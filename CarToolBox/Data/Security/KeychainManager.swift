@@ -291,14 +291,14 @@ class KeychainManager {
 
         guard status == errSecSuccess,
               let items = result as? [[String: Any]] else {
-            print("No keychain items found")
+            Logger.general.debug("No keychain items found")
             return
         }
 
-        print("Keychain items:")
+        Logger.general.debug("Keychain items:")
         for item in items {
             if let account = item[kSecAttrAccount as String] as? String {
-                print("  - \(account)")
+                Logger.general.debug("  - \(account)")
             }
         }
     }

@@ -19,7 +19,7 @@ class DataCache {
             let jsonData = try JSONEncoder().encode(data)
             cache.setObject(jsonData as NSData, forKey: key as NSString)
         } catch {
-            print("Failed to encode data for cache: \(error)")
+            Logger.general.error("Failed to encode data for cache: \(error)")
         }
     }
 
@@ -31,7 +31,7 @@ class DataCache {
         do {
             return try JSONDecoder().decode(T.self, from: data as Data)
         } catch {
-            print("Failed to decode data from cache: \(error)")
+            Logger.general.error("Failed to decode data from cache: \(error)")
             return nil
         }
     }

@@ -187,7 +187,7 @@ struct Config {
 #if DEBUG
 extension Config {
     static func printConfiguration() {
-        print("""
+        Logger.general.info("""
         ╔════════════════════════════════════════╗
         ║   CarToolBox Configuration                 ║
         ╠════════════════════════════════════════╣

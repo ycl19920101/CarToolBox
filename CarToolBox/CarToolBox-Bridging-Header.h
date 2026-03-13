@@ -13,3 +13,6 @@
 
 // Import Community Service for community features
 #import "CommunityService.h"
+
+// Import Network Manager for unified networking
+#import "NetworkManager.h"

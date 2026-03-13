@@ -6,12 +6,9 @@
 //
 
 #import "AuthService.h"
+#import "NetworkManager.h"
 #import <UIKit/UIKit.h>
 #import <sys/utsname.h>
-
-// Constants
-static NSString *const kDefaultBaseURL = @"http://localhost:3000/api";
-static NSString *const kAuthPath = @"/auth";
 
 // Error domain
 static NSString *const kAuthErrorDomain = @"com.cartoolbox.auth.error";
@@ -71,11 +68,6 @@ typedef NS_ENUM(NSInteger, AuthErrorCode) {
 
 // MARK: - AuthService Implementation
 
-@interface AuthService ()
-@property (nonatomic, strong) NSURLSession *session;
-@property (nonatomic, strong) dispatch_queue_t networkQueue;
-@end
-
 @implementation AuthService
 
 #pragma mark - Singleton
@@ -92,84 +84,18 @@ typedef NS_ENUM(NSInteger, AuthErrorCode) {
 #pragma mark - Initialization
 
 - (instancetype)init {
-    return [self initWithBaseURL:kDefaultBaseURL];
-}
-
-- (instancetype)initWithBaseURL:(NSString *)baseURL {
     self = [super init];
     if (self) {
-        _baseURL = [baseURL copy];
         _currentAccessToken = nil;
         _currentRefreshToken = nil;
-        _session = [NSURLSession sharedSession];
-        _networkQueue = dispatch_queue_create("com.cartoolbox.auth.network", DISPATCH_QUEUE_SERIAL);
     }
     return self;
 }
 
 #pragma mark - Private Methods
 
-- (NSURL *)URLForPath:(NSString *)path {
-    NSString *fullPath = [NSString stringWithFormat:@"%@%@%@", self.baseURL, kAuthPath, path];
-    return [NSURL URLWithString:fullPath];
-}
-
-- (NSMutableURLRequest *)requestForPath:(NSString *)path method:(NSString *)method body:(NSDictionary * _Nullable)body {
-    NSURL *url = [self URLForPath:path];
-    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
-    request.HTTPMethod = method;
-    [request setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
-    [request setValue:@"application/json" forHTTPHeaderField:@"Accept"];
-
-    // Add auth token if available
-    if (self.currentAccessToken) {
-        [request setValue:[NSString stringWithFormat:@"Bearer %@", self.currentAccessToken] forHTTPHeaderField:@"Authorization"];
-    }
-
-    // Add body if present
-    if (body) {
-        NSError *error;
-        NSData *jsonData = [NSJSONSerialization dataWithJSONObject:body options:0 error:&error];
-        if (jsonData) {
-            request.HTTPBody = jsonData;
-        } else {
-            NSLog(@"Error serializing JSON: %@", error);
-        }
-    }
-
-    return request;
-}
-
-- (NSError *)errorFromResponse:(NSDictionary *)response statusCode:(NSInteger)statusCode {
-    if (response[@"error"]) {
-        NSDictionary *errorDict = response[@"error"];
-        NSInteger code = [errorDict[@"code"] integerValue];
-        NSString *message = response[@"message"] ?: @"Unknown error";
-
-        return [NSError errorWithDomain:kAuthErrorDomain
-                                   code:code
-                               userInfo:@{NSLocalizedDescriptionKey: message}];
-    }
-
-    // Default error based on status code
-    NSString *message = [self messageForStatusCode:statusCode];
-    NSInteger code = statusCode == 401 ? AuthErrorCodeNotAuthenticated : AuthErrorCodeUnknown;
-
-    return [NSError errorWithDomain:kAuthErrorDomain
-                               code:code
-                           userInfo:@{NSLocalizedDescriptionKey: message}];
-}
-
-- (NSString *)messageForStatusCode:(NSInteger)statusCode {
-    switch (statusCode) {
-        case 400: return @"请求参数错误";
-        case 401: return @"未授权，请先登录";
-        case 403: return @"无权限访问";
-        case 404: return @"请求的资源不存在";
-        case 429: return @"请求过于频繁";
-        case 500: return @"服务器内部错误";
-        default: return @"请求失败";
-    }
+- (NSString *)authPath:(NSString *)path {
+    return [NSString stringWithFormat:@"/api/auth%@", path];
 }
 
 - (NSDictionary *)deviceInfo {
@@ -184,42 +110,24 @@ typedef NS_ENUM(NSInteger, AuthErrorCode) {
     };
 }
 
-#pragma mark - Network Request
+- (NSError *)errorFromResponse:(NSDictionary *)response statusCode:(NSInteger)statusCode {
+    if (response[@"error"]) {
+        NSDictionary *errorDict = response[@"error"];
+        NSInteger code = [errorDict[@"code"] integerValue];
+        NSString *message = response[@"message"] ?: @"Unknown error";
 
-- (void)performRequest:(NSURLRequest *)request completion:(void (^)(NSDictionary * _Nullable, NSInteger, NSError * _Nullable))completion {
-    __weak typeof(self) weakSelf = self;
+        return [NSError errorWithDomain:kAuthErrorDomain
+                                   code:code
+                               userInfo:@{NSLocalizedDescriptionKey: message}];
+    }
 
-    NSURLSessionDataTask *task = [self.session dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
-        __strong typeof(weakSelf) strongSelf = weakSelf;
+    // Default error based on status code
+    NSString *message = [[NetworkManager sharedInstance] messageForStatusCode:statusCode];
+    NSInteger code = statusCode == 401 ? AuthErrorCodeNotAuthenticated : AuthErrorCodeUnknown;
 
-        dispatch_async(strongSelf.networkQueue ?: dispatch_get_main_queue(), ^{
-            if (error) {
-                completion(nil, 0, error);
-                return;
-            }
-
-            NSHTTPURLResponse *httpResponse = (NSHTTPURLResponse *)response;
-            NSInteger statusCode = httpResponse.statusCode;
-
-            if (data && data.length > 0) {
-                NSError *jsonError;
-                NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:0 error:&jsonError];
-
-                if (jsonError) {
-                    completion(nil, statusCode, [NSError errorWithDomain:kAuthErrorDomain
-                                                                  code:AuthErrorCodeUnknown
-                                                              userInfo:@{NSLocalizedDescriptionKey: @"解析响应失败"}]);
-                    return;
-                }
-
-                completion(json, statusCode, nil);
-            } else {
-                completion(@{}, statusCode, nil);
-            }
-        });
-    }];
-
-    [task resume];
+    return [NSError errorWithDomain:kAuthErrorDomain
+                               code:code
+                           userInfo:@{NSLocalizedDescriptionKey: message}];
 }
 
 #pragma mark - Authentication
@@ -229,29 +137,29 @@ typedef NS_ENUM(NSInteger, AuthErrorCode) {
                        email:(NSString *)email
                        phone:(NSString *)phone
                   completion:(AuthCompletionHandler)completion {
-    NSMutableDictionary *body = [[self deviceInfo] mutableCopy];
-    body[@"username"] = username;
-    body[@"password"] = password;
-    if (email) body[@"email"] = email;
-    if (phone) body[@"phone"] = phone;
+    NSMutableDictionary *params = [[self deviceInfo] mutableCopy];
+    params[@"username"] = username;
+    params[@"password"] = password;
+    if (email) params[@"email"] = email;
+    if (phone) params[@"phone"] = phone;
 
-    NSMutableURLRequest *request = [self requestForPath:@"/register" method:@"POST" body:body];
+    NSString *path = [self authPath:@"/register"];
 
-    [self performRequest:request completion:^(NSDictionary *response, NSInteger statusCode, NSError *error) {
+    [[NetworkManager sharedInstance] POST:path parameters:params completion:^(NSDictionary *data, NSInteger statusCode, NSError *error) {
         if (error) {
             completion(nil, error);
             return;
         }
 
-        if (statusCode >= 200 && statusCode < 300 && response[@"success"]) {
+        if (statusCode >= 200 && statusCode < 300 && data[@"success"]) {
             // Store tokens
-            if (response[@"data"][@"tokens"]) {
-                [self updateTokensWithDictionary:response[@"data"][@"tokens"]];
+            if (data[@"data"][@"tokens"]) {
+                [self updateTokensWithDictionary:data[@"data"][@"tokens"]];
             }
 
-            completion(response[@"data"], nil);
+            completion(data[@"data"], nil);
         } else {
-            completion(nil, [self errorFromResponse:response statusCode:statusCode]);
+            completion(nil, [self errorFromResponse:data statusCode:statusCode]);
         }
     }];
 }
@@ -260,28 +168,28 @@ typedef NS_ENUM(NSInteger, AuthErrorCode) {
                   password:(NSString *)password
               rememberMe:(BOOL)rememberMe
                completion:(AuthCompletionHandler)completion {
-    NSMutableDictionary *body = [[self deviceInfo] mutableCopy];
-    body[@"identifier"] = identifier;
-    body[@"password"] = password;
-    body[@"remember_me"] = @(rememberMe);
+    NSMutableDictionary *params = [[self deviceInfo] mutableCopy];
+    params[@"identifier"] = identifier;
+    params[@"password"] = password;
+    params[@"remember_me"] = @(rememberMe);
 
-    NSMutableURLRequest *request = [self requestForPath:@"/login" method:@"POST" body:body];
+    NSString *path = [self authPath:@"/login"];
 
-    [self performRequest:request completion:^(NSDictionary *response, NSInteger statusCode, NSError *error) {
+    [[NetworkManager sharedInstance] POST:path parameters:params completion:^(NSDictionary *data, NSInteger statusCode, NSError *error) {
         if (error) {
             completion(nil, error);
             return;
         }
 
-        if (statusCode >= 200 && statusCode < 300 && response[@"success"]) {
+        if (statusCode >= 200 && statusCode < 300 && data[@"success"]) {
             // Store tokens
-            if (response[@"data"][@"tokens"]) {
-                [self updateTokensWithDictionary:response[@"data"][@"tokens"]];
+            if (data[@"data"][@"tokens"]) {
+                [self updateTokensWithDictionary:data[@"data"][@"tokens"]];
             }
 
-            completion(response[@"data"], nil);
+            completion(data[@"data"], nil);
         } else {
-            completion(nil, [self errorFromResponse:response statusCode:statusCode]);
+            completion(nil, [self errorFromResponse:data statusCode:statusCode]);
         }
     }];
 }
@@ -289,53 +197,53 @@ typedef NS_ENUM(NSInteger, AuthErrorCode) {
 - (void)loginWithPhone:(NSString *)phone
                   code:(NSString *)code
             completion:(AuthCompletionHandler)completion {
-    NSMutableDictionary *body = [[self deviceInfo] mutableCopy];
-    body[@"phone"] = phone;
-    body[@"code"] = code;
+    NSMutableDictionary *params = [[self deviceInfo] mutableCopy];
+    params[@"phone"] = phone;
+    params[@"code"] = code;
 
-    NSMutableURLRequest *request = [self requestForPath:@"/login-sms" method:@"POST" body:body];
+    NSString *path = [self authPath:@"/login-sms"];
 
-    [self performRequest:request completion:^(NSDictionary *response, NSInteger statusCode, NSError *error) {
+    [[NetworkManager sharedInstance] POST:path parameters:params completion:^(NSDictionary *data, NSInteger statusCode, NSError *error) {
         if (error) {
             completion(nil, error);
             return;
         }
 
-        if (statusCode >= 200 && statusCode < 300 && response[@"success"]) {
+        if (statusCode >= 200 && statusCode < 300 && data[@"success"]) {
             // Store tokens
-            if (response[@"data"][@"tokens"]) {
-                [self updateTokensWithDictionary:response[@"data"][@"tokens"]];
+            if (data[@"data"][@"tokens"]) {
+                [self updateTokensWithDictionary:data[@"data"][@"tokens"]];
             }
 
-            completion(response[@"data"], nil);
+            completion(data[@"data"], nil);
         } else {
-            completion(nil, [self errorFromResponse:response statusCode:statusCode]);
+            completion(nil, [self errorFromResponse:data statusCode:statusCode]);
         }
     }];
 }
 
 - (void)loginWithBiometricToken:(NSString *)refreshToken
                      completion:(AuthCompletionHandler)completion {
-    NSMutableDictionary *body = [[self deviceInfo] mutableCopy];
-    body[@"refresh_token"] = refreshToken;
+    NSMutableDictionary *params = [[self deviceInfo] mutableCopy];
+    params[@"refresh_token"] = refreshToken;
 
-    NSMutableURLRequest *request = [self requestForPath:@"/biometric-login" method:@"POST" body:body];
+    NSString *path = [self authPath:@"/biometric-login"];
 
-    [self performRequest:request completion:^(NSDictionary *response, NSInteger statusCode, NSError *error) {
+    [[NetworkManager sharedInstance] POST:path parameters:params completion:^(NSDictionary *data, NSInteger statusCode, NSError *error) {
         if (error) {
             completion(nil, error);
             return;
         }
 
-        if (statusCode >= 200 && statusCode < 300 && response[@"success"]) {
+        if (statusCode >= 200 && statusCode < 300 && data[@"success"]) {
             // Store tokens
-            if (response[@"data"][@"tokens"]) {
-                [self updateTokensWithDictionary:response[@"data"][@"tokens"]];
+            if (data[@"data"][@"tokens"]) {
+                [self updateTokensWithDictionary:data[@"data"][@"tokens"]];
             }
 
-            completion(response[@"data"], nil);
+            completion(data[@"data"], nil);
         } else {
-            completion(nil, [self errorFromResponse:response statusCode:statusCode]);
+            completion(nil, [self errorFromResponse:data statusCode:statusCode]);
         }
     }];
 }
@@ -343,19 +251,19 @@ typedef NS_ENUM(NSInteger, AuthErrorCode) {
 - (void)sendVerificationCodeToPhone:(NSString *)phone
                                type:(NSString *)type
                          completion:(AuthCompletionHandler)completion {
-    NSDictionary *body = @{@"phone": phone, @"type": type};
-    NSMutableURLRequest *request = [self requestForPath:@"/send-code" method:@"POST" body:body];
+    NSDictionary *params = @{@"phone": phone, @"type": type};
+    NSString *path = [self authPath:@"/send-code"];
 
-    [self performRequest:request completion:^(NSDictionary *response, NSInteger statusCode, NSError *error) {
+    [[NetworkManager sharedInstance] POST:path parameters:params completion:^(NSDictionary *data, NSInteger statusCode, NSError *error) {
         if (error) {
             completion(nil, error);
             return;
         }
 
-        if (statusCode >= 200 && statusCode < 300 && response[@"success"]) {
-            completion(response[@"data"], nil);
+        if (statusCode >= 200 && statusCode < 300 && data[@"success"]) {
+            completion(data[@"data"], nil);
         } else {
-            completion(nil, [self errorFromResponse:response statusCode:statusCode]);
+            completion(nil, [self errorFromResponse:data statusCode:statusCode]);
         }
     }];
 }
@@ -365,33 +273,33 @@ typedef NS_ENUM(NSInteger, AuthErrorCode) {
 - (void)changePasswordFrom:(NSString *)oldPassword
                         to:(NSString *)newPassword
                  completion:(SimpleCompletionHandler)completion {
-    NSDictionary *body = @{
+    NSDictionary *params = @{
         @"old_password": oldPassword,
         @"new_password": newPassword
     };
 
-    NSMutableURLRequest *request = [self requestForPath:@"/change-password" method:@"POST" body:body];
+    NSString *path = [self authPath:@"/change-password"];
 
-    [self performRequest:request completion:^(NSDictionary *response, NSInteger statusCode, NSError *error) {
+    [[NetworkManager sharedInstance] POST:path parameters:params completion:^(NSDictionary *data, NSInteger statusCode, NSError *error) {
         if (error) {
             completion(NO, error);
             return;
         }
 
-        if (statusCode >= 200 && statusCode < 300 && response[@"success"]) {
+        if (statusCode >= 200 && statusCode < 300 && data[@"success"]) {
             completion(YES, nil);
         } else {
-            completion(NO, [self errorFromResponse:response statusCode:statusCode]);
+            completion(NO, [self errorFromResponse:data statusCode:statusCode]);
         }
     }];
 }
 
 - (void)forgotPasswordWithEmail:(NSString *)email
                      completion:(AuthCompletionHandler)completion {
-    NSDictionary *body = @{@"email": email};
-    NSMutableURLRequest *request = [self requestForPath:@"/forgot-password" method:@"POST" body:body];
+    NSDictionary *params = @{@"email": email};
+    NSString *path = [self authPath:@"/forgot-password"];
 
-    [self performRequest:request completion:^(NSDictionary *response, NSInteger statusCode, NSError *error) {
+    [[NetworkManager sharedInstance] POST:path parameters:params completion:^(NSDictionary *data, NSInteger statusCode, NSError *error) {
         if (error) {
             completion(nil, error);
             return;
@@ -399,9 +307,9 @@ typedef NS_ENUM(NSInteger, AuthErrorCode) {
 
         // For forgot password, always return success even if user doesn't exist (security)
         if (statusCode >= 200 && statusCode < 300) {
-            completion(response, nil);
+            completion(data, nil);
         } else {
-            completion(nil, [self errorFromResponse:response statusCode:statusCode]);
+            completion(nil, [self errorFromResponse:data statusCode:statusCode]);
         }
     }];
 }
@@ -409,23 +317,23 @@ typedef NS_ENUM(NSInteger, AuthErrorCode) {
 - (void)resetPasswordWithToken:(NSString *)token
                   newPassword:(NSString *)newPassword
                    completion:(SimpleCompletionHandler)completion {
-    NSDictionary *body = @{
+    NSDictionary *params = @{
         @"token": token,
         @"password": newPassword
     };
 
-    NSMutableURLRequest *request = [self requestForPath:@"/reset-password" method:@"POST" body:body];
+    NSString *path = [self authPath:@"/reset-password"];
 
-    [self performRequest:request completion:^(NSDictionary *response, NSInteger statusCode, NSError *error) {
+    [[NetworkManager sharedInstance] POST:path parameters:params completion:^(NSDictionary *data, NSInteger statusCode, NSError *error) {
         if (error) {
             completion(NO, error);
             return;
         }
 
-        if (statusCode >= 200 && statusCode < 300 && response[@"success"]) {
+        if (statusCode >= 200 && statusCode < 300 && data[@"success"]) {
             completion(YES, nil);
         } else {
-            completion(NO, [self errorFromResponse:response statusCode:statusCode]);
+            completion(NO, [self errorFromResponse:data statusCode:statusCode]);
         }
     }];
 }
@@ -434,32 +342,32 @@ typedef NS_ENUM(NSInteger, AuthErrorCode) {
 
 - (void)refreshToken:(NSString *)refreshToken
           completion:(AuthCompletionHandler)completion {
-    NSDictionary *body = @{@"refresh_token": refreshToken};
-    NSMutableURLRequest *request = [self requestForPath:@"/refresh" method:@"POST" body:body];
+    NSDictionary *params = @{@"refresh_token": refreshToken};
+    NSString *path = [self authPath:@"/refresh"];
 
-    [self performRequest:request completion:^(NSDictionary *response, NSInteger statusCode, NSError *error) {
+    [[NetworkManager sharedInstance] POST:path parameters:params completion:^(NSDictionary *data, NSInteger statusCode, NSError *error) {
         if (error) {
             completion(nil, error);
             return;
         }
 
-        if (statusCode >= 200 && statusCode < 300 && response[@"success"]) {
+        if (statusCode >= 200 && statusCode < 300 && data[@"success"]) {
             // Update tokens
-            if (response[@"data"][@"tokens"]) {
-                [self updateTokensWithDictionary:response[@"data"][@"tokens"]];
+            if (data[@"data"][@"tokens"]) {
+                [self updateTokensWithDictionary:data[@"data"][@"tokens"]];
             }
 
-            completion(response[@"data"], nil);
+            completion(data[@"data"], nil);
         } else {
-            completion(nil, [self errorFromResponse:response statusCode:statusCode]);
+            completion(nil, [self errorFromResponse:data statusCode:statusCode]);
         }
     }];
 }
 
 - (void)logoutWithCompletion:(SimpleCompletionHandler)completion {
-    NSMutableURLRequest *request = [self requestForPath:@"/logout" method:@"POST" body:nil];
+    NSString *path = [self authPath:@"/logout"];
 
-    [self performRequest:request completion:^(NSDictionary *response, NSInteger statusCode, NSError *error) {
+    [[NetworkManager sharedInstance] POST:path parameters:nil completion:^(NSDictionary *data, NSInteger statusCode, NSError *error) {
         // Always clear local tokens regardless of server response
         [self clearTokens];
 
@@ -472,7 +380,7 @@ typedef NS_ENUM(NSInteger, AuthErrorCode) {
         if (statusCode >= 200 && statusCode < 300) {
             completion(YES, nil);
         } else {
-            completion(NO, [self errorFromResponse:response statusCode:statusCode]);
+            completion(NO, [self errorFromResponse:data statusCode:statusCode]);
         }
     }];
 }
@@ -480,18 +388,18 @@ typedef NS_ENUM(NSInteger, AuthErrorCode) {
 #pragma mark - User Info
 
 - (void)getCurrentUserWithCompletion:(AuthCompletionHandler)completion {
-    NSMutableURLRequest *request = [self requestForPath:@"/me" method:@"GET" body:nil];
+    NSString *path = [self authPath:@"/me"];
 
-    [self performRequest:request completion:^(NSDictionary *response, NSInteger statusCode, NSError *error) {
+    [[NetworkManager sharedInstance] GET:path parameters:nil completion:^(NSDictionary *data, NSInteger statusCode, NSError *error) {
         if (error) {
             completion(nil, error);
             return;
         }
 
-        if (statusCode >= 200 && statusCode < 300 && response[@"success"]) {
-            completion(response[@"data"], nil);
+        if (statusCode >= 200 && statusCode < 300 && data[@"success"]) {
+            completion(data[@"data"], nil);
         } else {
-            completion(nil, [self errorFromResponse:response statusCode:statusCode]);
+            completion(nil, [self errorFromResponse:data statusCode:statusCode]);
         }
     }];
 }

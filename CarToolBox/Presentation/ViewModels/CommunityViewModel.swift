@@ -20,11 +20,27 @@ class CommunityViewModel: ObservableObject {
     private let pageSize: Int = 20
 
     private var communityService: CommunityService
+    private var notificationObserver: NSObjectProtocol?
 
     init() {
         communityService = CommunityService()
+        notificationObserver = NotificationCenter.default.addObserver(
+            forName: .postDidCreate,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { [weak self] in
+                await self?.refreshPosts()
+            }
+        }
         Task {
             await fetchPosts()
+        }
+    }
+
+    deinit {
+        if let observer = notificationObserver {
+            NotificationCenter.default.removeObserver(observer)
         }
     }
 
@@ -45,9 +61,25 @@ class CommunityViewModel: ObservableObject {
                       success,
                       let data = response["data"] as? [String: Any] {
                 let postsData = data["posts"] as? [[String: Any]] ?? []
+
+                // Debug: Log posts data
+                Logger.community.debug("Fetched \(postsData.count) posts")
+                if let firstPost = postsData.first {
+                    Logger.community.debug("First post media: \(firstPost["media"] ?? "nil")")
+                }
+
                 do {
                     let jsonData = try JSONSerialization.data(withJSONObject: postsData)
                     let newPosts = try JSONDecoder().decode([PostDTO].self, from: jsonData)
+
+                    // Debug: Log decoded posts media count
+                    Logger.community.debug("Decoded \(newPosts.count) posts")
+                    if let firstPost = newPosts.first {
+                        Logger.community.debug("First decoded post media count: \(firstPost.media.count)")
+                        if let firstMedia = firstPost.media.first {
+                            Logger.community.debug("First media URL: \(firstMedia.url)")
+                        }
+                    }
                     if self.currentPage == 1 {
                         self.posts = newPosts
                     } else {

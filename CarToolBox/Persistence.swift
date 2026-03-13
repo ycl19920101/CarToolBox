@@ -41,7 +41,7 @@ struct PersistenceController {
             try container.viewContext.save()
         } catch {
             let nsError = error as NSError
-            print("Unresolved error \(nsError), \(nsError.userInfo)")
+            Logger.general.error("Unresolved error \(nsError), \(nsError.userInfo)")
         }
     }
 }

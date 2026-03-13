@@ -34,7 +34,7 @@ class VehicleRepository: ObservableObject {
         do {
             try context.save()
         } catch {
-            print("Error updating vehicle: \(error)")
+            Logger.general.error("Error updating vehicle: \(error)")
         }
     }
 
@@ -43,7 +43,7 @@ class VehicleRepository: ObservableObject {
         do {
             try context.save()
         } catch {
-            print("Error deleting vehicle: \(error)")
+            Logger.general.error("Error deleting vehicle: \(error)")
         }
     }
 }

@@ -55,7 +55,7 @@ class UserManager: ObservableObject {
                 self.isLoggedIn = false // Not logged in, just has cached data
             }
         } catch {
-            print("Error loading user from Core Data: \(error)")
+            Logger.auth.error("Error loading user from Core Data: \(error)")
         }
 
         self.isLoading = false
@@ -122,7 +122,7 @@ class UserManager: ObservableObject {
                 self.currentUser = newUser
             }
         } catch {
-            print("Error syncing user from AuthViewModel: \(error)")
+            Logger.auth.error("Error syncing user from AuthViewModel: \(error)")
         }
     }
 
@@ -179,7 +179,7 @@ class UserManager: ObservableObject {
         do {
             try context.execute(deleteRequest)
         } catch {
-            print("Error clearing users: \(error)")
+            Logger.auth.error("Error clearing users: \(error)")
         }
     }
 
@@ -195,7 +195,7 @@ class UserManager: ObservableObject {
         do {
             try context.save()
         } catch {
-            print("Error updating profile: \(error)")
+            Logger.auth.error("Error updating profile: \(error)")
         }
 
         // Also update AuthViewModel

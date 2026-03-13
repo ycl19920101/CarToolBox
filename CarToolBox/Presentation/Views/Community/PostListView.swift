@@ -171,7 +171,7 @@ struct MediaPreviewView: View {
             HStack(spacing: 8) {
                 ForEach(media.prefix(4)) { item in
                     if item.type == "image" {
-                        AsyncImage(url: URL(string: item.thumbnail_url ?? item.url)) { image in
+                        AsyncImage(url: URL(string: item.fullThumbnailURL ?? item.fullURL)) { image in
                             image.resizable()
                                 .aspectRatio(contentMode: .fill)
                         } placeholder: {

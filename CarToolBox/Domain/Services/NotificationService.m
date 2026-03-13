@@ -6,6 +6,7 @@
 //
 
 #import "NotificationService.h"
+#import "CarToolBox-Swift.h"
 
 NSErrorDomain const NotificationServiceErrorDomain = @"NotificationService";
 
@@ -32,9 +33,9 @@ NSErrorDomain const NotificationServiceErrorDomain = @"NotificationService";
     UNAuthorizationOptions options = UNAuthorizationOptionBadge | UNAuthorizationOptionSound | UNAuthorizationOptionAlert;
     [center requestAuthorizationWithOptions:options completionHandler:^(BOOL granted, NSError * _Nullable error) {
         if (granted) {
-            NSLog(@"Notifications authorized");
+            [OCLogger info:@"Notification" message:@"Notifications authorized"];
         } else {
-            NSLog(@"Notifications not authorized: %@", error.localizedDescription);
+            [OCLogger warning:@"Notification" message:[NSString stringWithFormat:@"Notifications not authorized: %@", error.localizedDescription]];
         }
     }];
 }
@@ -60,9 +61,9 @@ NSErrorDomain const NotificationServiceErrorDomain = @"NotificationService";
 
     [center addNotificationRequest:request withCompletionHandler:^(NSError * _Nullable error) {
         if (error) {
-            NSLog(@"Failed to schedule battery notification: %@", error.localizedDescription);
+            [OCLogger warning:@"Notification" message:[NSString stringWithFormat:@"Failed to schedule battery notification: %@", error.localizedDescription]];
         } else {
-            NSLog(@"Battery notification scheduled");
+            [OCLogger debug:@"Notification" message:@"Battery notification scheduled"];
         }
     }];
 }
@@ -88,9 +89,9 @@ NSErrorDomain const NotificationServiceErrorDomain = @"NotificationService";
 
     [center addNotificationRequest:request withCompletionHandler:^(NSError * _Nullable error) {
         if (error) {
-            NSLog(@"Failed to schedule charging complete notification: %@", error.localizedDescription);
+            [OCLogger warning:@"Notification" message:[NSString stringWithFormat:@"Failed to schedule charging complete notification: %@", error.localizedDescription]];
         } else {
-            NSLog(@"Charging complete notification scheduled");
+            [OCLogger info:@"Notification" message:@"Charging complete notification scheduled"];
         }
     }];
 }

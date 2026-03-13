@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import AVKit
 
 struct PostDetailView: View {
     let post: PostDTO
@@ -205,12 +206,13 @@ struct CommentCellView: View {
 
 struct MediaGridView: View {
     let media: [MediaDTO]
+    @State private var selectedVideoURL: VideoURLWrapper?
 
     var body: some View {
         VStack(spacing: 8) {
             ForEach(media) { item in
                 if item.type == "image" {
-                    AsyncImage(url: URL(string: item.url)) { image in
+                    AsyncImage(url: URL(string: item.fullURL)) { image in
                         image.resizable()
                             .aspectRatio(contentMode: .fit)
                     } placeholder: {
@@ -219,16 +221,184 @@ struct MediaGridView: View {
                     }
                     .cornerRadius(8)
                 } else if item.type == "video" {
-                    ZStack {
-                        Color.black
-                            .frame(height: 200)
-                            .cornerRadius(8)
-                        Image(systemName: "play.circle.fill")
-                            .font(.largeTitle)
-                            .foregroundColor(.white)
-                    }
+                    VideoThumbnailCell(thumbnailURL: item.fullThumbnailURL, videoURL: item.fullURL, duration: item.duration)
+                        .onTapGesture {
+                            Logger.community.debug("Video tapped, fullURL: \(item.fullURL)")
+                            if let url = URL(string: item.fullURL) {
+                                Logger.community.debug("Video URL created: \(url.absoluteString)")
+                                selectedVideoURL = VideoURLWrapper(url: url)
+                            } else {
+                                Logger.community.error("Failed to create URL from: \(item.fullURL)")
+                            }
+                        }
+                        .cornerRadius(8)
                 }
             }
+        }
+        .fullScreenCover(item: $selectedVideoURL) { wrapper in
+            VideoPlayerView(videoURL: wrapper.url)
+        }
+    }
+}
+
+// MARK: - Video URL Wrapper for Identifiable
+
+struct VideoURLWrapper: Identifiable {
+    let id = UUID()
+    let url: URL
+}
+
+// MARK: - Video Thumbnail Cell
+
+struct VideoThumbnailCell: View {
+    let thumbnailURL: String?
+    let videoURL: String
+    let duration: Double?
+    @State private var thumbnail: UIImage?
+
+    var body: some View {
+        ZStack {
+            if let thumbnailURL = thumbnailURL,
+               let url = URL(string: thumbnailURL) {
+                AsyncImage(url: url) { image in
+                    image.resizable()
+                        .aspectRatio(contentMode: .fill)
+                } placeholder: {
+                    Color.gray.opacity(0.2)
+                    ProgressView()
+                }
+            } else {
+                Color.black
+            }
+
+            VStack {
+                Spacer()
+                HStack {
+                    Spacer()
+                    if let duration = duration {
+                        Text(formatDuration(duration))
+                            .font(.caption)
+                            .padding(4)
+                            .background(Color.black.opacity(0.7))
+                            .foregroundColor(.white)
+                            .cornerRadius(4)
+                    }
+                }
+                .padding(8)
+            }
+
+            Image(systemName: "play.circle.fill")
+                .font(.system(size: 50))
+                .foregroundColor(.white)
+                .shadow(radius: 4)
+        }
+        .frame(height: 200)
+        .clipped()
+    }
+
+    private func formatDuration(_ seconds: Double) -> String {
+        let minutes = Int(seconds) / 60
+        let remainingSeconds = Int(seconds) % 60
+        return String(format: "%d:%02d", minutes, remainingSeconds)
+    }
+}
+
+// MARK: - Video Player View
+
+struct VideoPlayerView: View {
+    let videoURL: URL
+    @Environment(\.dismiss) private var dismiss
+    @State private var player: AVPlayer?
+    @State private var isLoading = true
+    @State private var errorMessage: String?
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+
+            if let error = errorMessage {
+                VStack(spacing: 16) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .font(.system(size: 50))
+                        .foregroundColor(.white)
+                    Text("视频加载失败")
+                        .foregroundColor(.white)
+                    Text(error)
+                        .font(.caption)
+                        .foregroundColor(.gray)
+                        .multilineTextAlignment(.center)
+                    Button("关闭") {
+                        dismiss()
+                    }
+                    .foregroundColor(.blue)
+                }
+                .padding()
+            } else if let player = player {
+                VideoPlayer(player: player)
+                    .ignoresSafeArea()
+            } else if isLoading {
+                ProgressView()
+                    .foregroundColor(.white)
+            }
+
+            // 关闭按钮 - 始终显示在顶部
+            VStack {
+                HStack {
+                    Spacer()
+                    Button(action: {
+                        player?.pause()
+                        dismiss()
+                    }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.title)
+                            .foregroundColor(.white)
+                            .shadow(radius: 2)
+                    }
+                    .padding()
+                }
+                Spacer()
+            }
+        }
+        .onAppear {
+            loadAndPlayVideo()
+        }
+        .onDisappear {
+            player?.pause()
+            player = nil
+        }
+    }
+
+    private func loadAndPlayVideo() {
+        isLoading = true
+        errorMessage = nil
+
+        Logger.community.debug("Loading video from URL: \(videoURL.absoluteString)")
+
+        // 验证 URL
+        guard videoURL.scheme == "http" || videoURL.scheme == "https" else {
+            errorMessage = "无效的视频URL"
+            isLoading = false
+            return
+        }
+
+        // 创建 player
+        let newPlayer = AVPlayer(url: videoURL)
+        player = newPlayer
+
+        // 监听播放状态
+        NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemFailedToPlayToEndTime,
+            object: newPlayer.currentItem,
+            queue: .main
+        ) { _ in
+            errorMessage = "视频播放失败"
+            isLoading = false
+        }
+
+        // 延迟一点播放，确保 UI 已准备好
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            isLoading = false
+            newPlayer.play()
         }
     }
 }

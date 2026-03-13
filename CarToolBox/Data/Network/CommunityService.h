@@ -12,6 +12,9 @@ NS_ASSUME_NONNULL_BEGIN
 /// Community service for network calls
 @interface CommunityService : NSObject
 
+/// Shared singleton instance
++ (instancetype)sharedInstance;
+
 /// Get posts list
 /// @param page Page number (default 1)
 /// @param pageSize Page size (default 20)

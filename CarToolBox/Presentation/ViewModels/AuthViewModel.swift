@@ -215,7 +215,7 @@ class AuthViewModel: ObservableObject {
                 try keychainManager.setRememberMe(rememberMe)
                 try? keychainManager.enableBiometric()
             } catch {
-                print("Failed to save auth state: \(error)")
+                Logger.auth.error("Failed to save auth state: \(error)")
             }
         }
     }
@@ -254,9 +254,15 @@ class AuthViewModel: ObservableObject {
 
     func login() {
         guard isLoginValid else {
+            Logger.auth.error("Login validation failed: missing identifier or password")
             errorMessage = "请输入用户名和密码"
             return
         }
+
+        Logger.auth.separator()
+        Logger.auth.info("Starting login...")
+        Logger.auth.debug("Identifier: \(loginIdentifier)")
+        Logger.auth.debug("Remember me: \(rememberMe)")
 
         authState = .loading
         errorMessage = nil
@@ -266,16 +272,22 @@ class AuthViewModel: ObservableObject {
                 guard let self = self else { return }
 
                 if let error = error {
+                    Logger.auth.error("Login failed: \(error.localizedDescription)")
+                    if let nsError = error as NSError? {
+                        Logger.auth.error("Error domain: \(nsError.domain), code: \(nsError.code)")
+                    }
                     self.handleError(error)
                     self.authState = .idle
                     return
                 }
 
                 if let data = data {
+                    Logger.auth.info("Login successful")
                     self.handleAuthResponse(data)
                     self.successMessage = "登录成功"
                     self.authState = .authenticated
                 }
+                Logger.auth.separator()
             }
         }
     }
@@ -284,9 +296,16 @@ class AuthViewModel: ObservableObject {
 
     func register() {
         guard isRegisterValid else {
+            Logger.auth.error("Register validation failed")
             errorMessage = "请填写完整的注册信息"
             return
         }
+
+        Logger.auth.separator()
+        Logger.auth.info("Starting registration...")
+        Logger.auth.debug("Username: \(registerUsername)")
+        Logger.auth.debug("Email: \(registerEmail.isEmpty ? "none" : registerEmail)")
+        Logger.auth.debug("Phone: \(registerPhone.isEmpty ? "none" : registerPhone)")
 
         authState = .loading
         errorMessage = nil
@@ -299,16 +318,22 @@ class AuthViewModel: ObservableObject {
                 guard let self = self else { return }
 
                 if let error = error {
+                    Logger.auth.error("Registration failed: \(error.localizedDescription)")
+                    if let nsError = error as NSError? {
+                        Logger.auth.error("Error domain: \(nsError.domain), code: \(nsError.code)")
+                    }
                     self.handleError(error)
                     self.authState = .idle
                     return
                 }
 
                 if let data = data {
+                    Logger.auth.info("Registration successful")
                     self.handleAuthResponse(data)
                     self.successMessage = "注册成功"
                     self.authState = .authenticated
                 }
+                Logger.auth.separator()
             }
         }
     }
@@ -582,17 +607,23 @@ class AuthViewModel: ObservableObject {
     // MARK: - Helper Methods
 
     private func handleAuthResponse(_ data: [AnyHashable: Any]) {
+        Logger.auth.debug("Handling auth response...")
+
         // Handle user data - support both formats:
         // 1. { "user": {...}, "tokens": {...} } - from login/register
         // 2. { "id": "...", "username": "..." } - direct user object from /me
         if let userDict = data["user"] as? [String: Any] {
             // Login/register response format
+            Logger.auth.debug("Found user dict in response")
             let userDTO = UserDTO(dictionary: userDict)
             currentUser.update(from: userDTO)
+            Logger.auth.debug("User: id=\(currentUser.id), username=\(currentUser.username)")
         } else if let userId = data["id"] as? String {
             // Direct user object format (from /me endpoint)
+            Logger.auth.debug("Found direct user object in response")
             let userDTO = UserDTO(dictionary: data as? [String: Any] ?? [:])
             currentUser.update(from: userDTO)
+            Logger.auth.debug("User: id=\(currentUser.id), username=\(currentUser.username)")
         }
 
         // Handle tokens
@@ -600,14 +631,21 @@ class AuthViewModel: ObservableObject {
            let accessToken = tokensDict["access_token"] as? String,
            let refreshToken = tokensDict["refresh_token"] as? String {
 
+            Logger.auth.debug("Found tokens in response")
+            Logger.auth.debug("Access token: \(accessToken.prefix(20))...")
+            Logger.auth.debug("Refresh token: \(refreshToken.prefix(20))...")
+
             do {
                 try keychainManager.saveAccessToken(accessToken)
                 try keychainManager.saveRefreshToken(refreshToken)
                 authService.currentAccessToken = accessToken
                 authService.currentRefreshToken = refreshToken
+                Logger.auth.debug("✅ Tokens saved to keychain")
             } catch {
-                print("Failed to save tokens: \(error)")
+                Logger.auth.error("❌ Failed to save tokens: \(error)")
             }
+        } else {
+            Logger.auth.debug("No tokens in response (might be /me endpoint)")
         }
 
         saveAuthState()

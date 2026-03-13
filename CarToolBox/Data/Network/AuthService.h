@@ -44,20 +44,11 @@ typedef void (^SimpleCompletionHandler)(BOOL success, NSError * _Nullable error)
 /// Shared singleton instance
 + (instancetype)sharedInstance;
 
-/// API base URL (configurable)
-@property (nonatomic, copy) NSString *baseURL;
-
 /// Current access token
 @property (nonatomic, copy, nullable) NSString *currentAccessToken;
 
 /// Current refresh token
 @property (nonatomic, copy, nullable) NSString *currentRefreshToken;
-
-/// Initialize with default base URL
-- (instancetype)init;
-
-/// Initialize with custom base URL
-- (instancetype)initWithBaseURL:(NSString *)baseURL;
 
 // MARK: - Authentication
 
