@@ -13,7 +13,6 @@ struct CreatePostView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var selectedItems: [PhotosPickerItem] = []
     @State private var selectedVideoItem: PhotosPickerItem?
-    @State private var isShowingVideoPicker = false
 
     var body: some View {
         NavigationView {
@@ -28,84 +27,107 @@ struct CreatePostView: View {
                 }
 
                 Section(header: Text("图片（可选，最多9张）")) {
-                    PhotosPicker(selection: $selectedItems, maxSelectionCount: 9, matching: .images) {
+                    if viewModel.selectedVideoURL != nil {
                         HStack {
-                            Image(systemName: "photo")
-                            Text("选择图片")
+                            Image(systemName: "exclamationmark.triangle")
+                                .foregroundColor(.orange)
+                            Text("已选择视频，无法添加图片")
+                                .foregroundColor(.secondary)
                         }
-                    }
-                    .disabled(viewModel.selectedVideoURL != nil)
-                    .onChange(of: selectedItems) { newItems in
-                        Task {
-                            for item in newItems {
-                                if let data = try? await item.loadTransferable(type: Data.self),
-                                   let image = UIImage(data: data) {
-                                    viewModel.addImage(image)
-                                }
+                    } else {
+                        PhotosPicker(selection: $selectedItems, maxSelectionCount: 9, matching: .images) {
+                            HStack {
+                                Image(systemName: "photo")
+                                Text(viewModel.selectedImages.isEmpty ? "选择图片" : "继续选择（已选\(viewModel.selectedImages.count)/9张）")
                             }
                         }
-                    }
+                        .onChange(of: selectedItems) { newItems in
+                            Task {
+                                var images: [UIImage] = []
+                                for item in newItems {
+                                    if let data = try? await item.loadTransferable(type: Data.self),
+                                       let image = UIImage(data: data) {
+                                        images.append(image)
+                                    }
+                                }
+                                viewModel.setImages(images)
+                            }
+                        }
 
-                    if !viewModel.selectedImages.isEmpty {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack {
-                                ForEach(viewModel.selectedImages.indices, id: \.self) { index in
-                                    ZStack(alignment: .topTrailing) {
-                                        Image(uiImage: viewModel.selectedImages[index])
-                                            .resizable()
-                                            .scaledToFill()
-                                            .frame(width: 80, height: 80)
-                                            .cornerRadius(8)
-                                            .clipped()
+                        if !viewModel.selectedImages.isEmpty {
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack {
+                                    ForEach(viewModel.selectedImages.indices, id: \.self) { index in
+                                        ZStack(alignment: .topTrailing) {
+                                            Image(uiImage: viewModel.selectedImages[index])
+                                                .resizable()
+                                                .scaledToFill()
+                                                .frame(width: 80, height: 80)
+                                                .cornerRadius(8)
+                                                .clipped()
 
-                                        Button(action: {
-                                            viewModel.removeImage(at: index)
-                                        }) {
-                                            Image(systemName: "xmark.circle.fill")
-                                                .foregroundColor(.red)
-                                                .background(Circle().fill(.white))
+                                            Button(action: {
+                                                viewModel.removeImage(at: index)
+                                            }) {
+                                                Image(systemName: "xmark.circle.fill")
+                                                    .foregroundColor(.red)
+                                                    .background(Circle().fill(.white))
+                                            }
+                                            .offset(x: 4, y: -4)
                                         }
-                                        .offset(x: 4, y: -4)
                                     }
                                 }
                             }
+                            Text("还可添加 \(9 - viewModel.selectedImages.count) 张图片")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
                         }
                     }
                 }
 
                 Section(header: Text("视频（可选，仅支持1个）")) {
-                    PhotosPicker(selection: $selectedVideoItem, matching: .videos) {
+                    if !viewModel.selectedImages.isEmpty {
                         HStack {
-                            Image(systemName: "video")
-                            Text("选择视频")
+                            Image(systemName: "exclamationmark.triangle")
+                                .foregroundColor(.orange)
+                            Text("已选择图片，无法添加视频")
+                                .foregroundColor(.secondary)
                         }
-                    }
-                    .disabled(!viewModel.selectedImages.isEmpty)
-                    .onChange(of: selectedVideoItem) { newItem in
-                        Task {
-                            if let newItem = newItem {
-                                if let videoTransferable = try? await newItem.loadTransferable(type: VideoTransferable.self) {
-                                    viewModel.setVideoURL(videoTransferable.url)
+                    } else {
+                        PhotosPicker(selection: $selectedVideoItem, matching: .videos) {
+                            HStack {
+                                Image(systemName: "video")
+                                Text(viewModel.selectedVideoURL == nil ? "选择视频" : "重新选择视频")
+                            }
+                        }
+                        .onChange(of: selectedVideoItem) { newItem in
+                            Task {
+                                if let newItem = newItem {
+                                    if let videoTransferable = try? await newItem.loadTransferable(type: VideoTransferable.self) {
+                                        viewModel.setVideoURL(videoTransferable.url)
+                                    }
+                                } else {
+                                    viewModel.removeVideo()
                                 }
                             }
                         }
-                    }
 
-                    if let videoURL = viewModel.selectedVideoURL {
-                        ZStack(alignment: .topTrailing) {
-                            VideoThumbnailView(videoURL: videoURL)
-                                .frame(height: 150)
-                                .cornerRadius(8)
+                        if let videoURL = viewModel.selectedVideoURL {
+                            ZStack(alignment: .topTrailing) {
+                                VideoThumbnailView(videoURL: videoURL)
+                                    .frame(height: 150)
+                                    .cornerRadius(8)
 
-                            Button(action: {
-                                viewModel.removeVideo()
-                                selectedVideoItem = nil
-                            }) {
-                                Image(systemName: "xmark.circle.fill")
-                                    .foregroundColor(.red)
-                                    .background(Circle().fill(.white))
+                                Button(action: {
+                                    viewModel.removeVideo()
+                                    selectedVideoItem = nil
+                                }) {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .foregroundColor(.red)
+                                        .background(Circle().fill(.white))
+                                }
+                                .offset(x: 4, y: -4)
                             }
-                            .offset(x: 4, y: -4)
                         }
                     }
                 }

@@ -36,8 +36,29 @@ class CreatePostViewModel: ObservableObject {
     }
 
     func addImage(_ image: UIImage) {
+        // Clear video if any (图片和视频只能二选一)
+        if selectedVideoURL != nil {
+            selectedVideoURL = nil
+            Logger.community.debug("Cleared video because images selected")
+        }
+        // Limit to 9 images max
+        guard selectedImages.count < 9 else {
+            Logger.community.warning("Cannot add more than 9 images")
+            return
+        }
         selectedImages.append(image)
         Logger.community.debug("Added image, total: \(selectedImages.count)")
+    }
+
+    func setImages(_ images: [UIImage]) {
+        // Clear video if any (图片和视频只能二选一)
+        if selectedVideoURL != nil {
+            selectedVideoURL = nil
+            Logger.community.debug("Cleared video because images selected")
+        }
+        // Limit to 9 images max
+        selectedImages = Array(images.prefix(9))
+        Logger.community.debug("Set \(selectedImages.count) images")
     }
 
     func removeImage(at index: Int) {
@@ -51,6 +72,11 @@ class CreatePostViewModel: ObservableObject {
     }
 
     func setVideoURL(_ url: URL) {
+        // Clear images if any (图片和视频只能二选一)
+        if !selectedImages.isEmpty {
+            selectedImages.removeAll()
+            Logger.community.debug("Cleared images because video selected")
+        }
         selectedVideoURL = url
         Logger.community.debug("Video URL set: \(url.path)")
     }

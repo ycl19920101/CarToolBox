@@ -12,6 +12,7 @@ struct PostDetailView: View {
     let post: PostDTO
     @StateObject private var viewModel: PostDetailViewModel
     @Environment(\.dismiss) private var dismiss
+    @State private var showShareSheet = false
 
     init(post: PostDTO) {
         self.post = post
@@ -86,7 +87,7 @@ struct PostDetailView: View {
                         Spacer()
 
                         Button(action: {
-                            // TODO: 分享功能
+                            showShareSheet = true
                         }) {
                             HStack {
                                 Image(systemName: "square.and.arrow.up")
@@ -134,6 +135,13 @@ struct PostDetailView: View {
                         dismiss()
                     }
                 }
+            }
+            .sheet(isPresented: $showShareSheet) {
+                ShareSheet(activityItems: [
+                    post.title,
+                    post.content,
+                    URL(string: "https://cartoolbox.app/posts/\(post.id)")!
+                ])
             }
         }
     }
@@ -401,6 +409,18 @@ struct VideoPlayerView: View {
             newPlayer.play()
         }
     }
+}
+
+// MARK: - Share Sheet
+
+struct ShareSheet: UIViewControllerRepresentable {
+    let activityItems: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
 
 #Preview {
