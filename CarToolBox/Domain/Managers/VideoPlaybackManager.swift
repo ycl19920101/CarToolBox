@@ -15,6 +15,7 @@ class VideoPlaybackManager: ObservableObject {
 
     @Published var currentPlayingPostId: String?
     @Published var currentPlayer: AVPlayer?
+    @Published var isMuted: Bool = true
 
     private var looperObserver: NSObjectProtocol?
 
@@ -30,7 +31,7 @@ class VideoPlaybackManager: ObservableObject {
             stopCurrentVideo()
 
             let player = AVPlayer(url: url)
-            player.isMuted = true
+            player.isMuted = isMuted
             currentPlayer = player
             currentPlayingPostId = postId
 
@@ -40,6 +41,12 @@ class VideoPlaybackManager: ObservableObject {
             // Setup loop playback
             setupLoopPlayback(for: player)
         }
+    }
+
+    /// Toggle mute state
+    func toggleMute() {
+        isMuted.toggle()
+        currentPlayer?.isMuted = isMuted
     }
 
     /// Stop the currently playing video

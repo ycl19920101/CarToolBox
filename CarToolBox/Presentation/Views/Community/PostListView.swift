@@ -438,12 +438,16 @@ struct AutoPlayingVideoCell: View {
                     // Mute indicator (top-left)
                     VStack {
                         HStack {
-                            Image(systemName: "speaker.slash.fill")
-                                .font(.caption)
-                                .foregroundColor(.white)
-                                .padding(6)
-                                .background(Color.black.opacity(0.5))
-                                .clipShape(Circle())
+                            Button(action: {
+                                playbackManager.toggleMute()
+                            }) {
+                                Image(systemName: playbackManager.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                                    .font(.caption)
+                                    .foregroundColor(.white)
+                                    .padding(6)
+                                    .background(Color.black.opacity(0.5))
+                                    .clipShape(Circle())
+                            }
                             Spacer()
                         }
                         Spacer()
