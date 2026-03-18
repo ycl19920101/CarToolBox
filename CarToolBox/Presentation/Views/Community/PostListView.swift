@@ -10,9 +10,10 @@ import AVKit
 
 struct PostListView: View {
     @StateObject private var viewModel = CommunityViewModel()
-    @StateObject private var videoPlaybackManager = VideoPlaybackManager.shared
+    @ObservedObject private var videoPlaybackManager = VideoPlaybackManager.shared
     @State private var isShowingCreatePost = false
     @State private var selectedVideoMedia: MediaDTO?
+    @State private var selectedVideoPost: PostDTO?
     @State private var selectedImageMedia: (images: [MediaDTO], initialIndex: Int)?
     @State private var viewFrames: [String: CGRect] = [:]
 
@@ -49,7 +50,11 @@ struct PostListView: View {
                             )
                             .trackFrame(id: post.id)
                             .onTapGesture {
-                                viewModel.selectedPost = post
+                                if post.hasVideo {
+                                    selectedVideoPost = post
+                                } else {
+                                    viewModel.selectedPost = post
+                                }
                             }
                         }
 
@@ -89,15 +94,24 @@ struct PostListView: View {
         .sheet(item: $viewModel.selectedPost) { post in
             PostDetailView(post: post)
         }
+        .fullScreenCover(item: $selectedVideoPost, onDismiss: {
+            // Re-start video auto-play when returning from detail page
+            // Delay to ensure view frames are updated after dismiss
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                updatePlayingVideo()
+            }
+        }) { post in
+            if let videoMedia = post.firstVideoMedia,
+               let url = URL(string: videoMedia.fullURL) {
+                VideoPostDetailView(post: post, videoURL: url)
+            }
+        }
         .fullScreenCover(item: $selectedVideoMedia) { media in
             if let url = URL(string: media.fullURL) {
                 VideoPlayerView(videoURL: url)
             }
         }
-        .fullScreenCover(item: Binding(
-            get: { selectedImageMedia.map { ImageMediaWrapper(images: $0.images, initialIndex: $0.initialIndex) } },
-            set: { selectedImageMedia = $0.map { ($0.images, $0.initialIndex) } }
-        )) { wrapper in
+        .fullScreenCover(item: imageMediaBinding) { wrapper in
             ImageViewerView(images: wrapper.images, initialIndex: wrapper.initialIndex)
         }
         .task {
@@ -115,6 +129,24 @@ struct PostListView: View {
         } message: {
             Text(viewModel.errorMessage ?? "")
         }
+    }
+
+    // MARK: - Computed Properties
+
+    private var imageMediaBinding: Binding<ImageMediaWrapper?> {
+        Binding(
+            get: {
+                guard let data = selectedImageMedia else { return nil }
+                return ImageMediaWrapper(images: data.images, initialIndex: data.initialIndex)
+            },
+            set: { newValue in
+                guard let wrapper = newValue else {
+                    selectedImageMedia = nil
+                    return
+                }
+                selectedImageMedia = (wrapper.images, wrapper.initialIndex)
+            }
+        )
     }
 
     // MARK: - Video Auto-Play Logic
@@ -178,9 +210,16 @@ struct PostListView: View {
 // MARK: - Image Media Wrapper
 
 struct ImageMediaWrapper: Identifiable {
-    let id = UUID()
+    let id: String
     let images: [MediaDTO]
     let initialIndex: Int
+
+    init(images: [MediaDTO], initialIndex: Int) {
+        self.images = images
+        self.initialIndex = initialIndex
+        // Use first image id as wrapper id to ensure stability
+        self.id = images.first?.id ?? UUID().uuidString
+    }
 }
 
 struct PostCellView: View {
@@ -295,7 +334,7 @@ struct MediaPreviewView: View {
         case .singleImage:
             SingleMediaView(media: media[0], onImageTap: onImageTap)
         case .singleVideo:
-            AutoPlayingVideoCell(media: media[0], isPlaying: isVideoPlaying, onFullscreenTap: { onVideoTap?(media[0]) })
+            AutoPlayingVideoCell(media: media[0], isPlaying: isVideoPlaying, onFullscreenTap: nil)
         case .twoImages:
             TwoMediaView(media: Array(media.prefix(2)), onVideoTap: onVideoTap, onImageTap: onImageTap)
         case .threeImages:
@@ -409,8 +448,10 @@ struct VideoPreviewCell: View {
     }
 
     private func formatDuration(_ seconds: Double) -> String {
-        let minutes = Int(seconds) / 60
-        let remainingSeconds = Int(seconds) % 60
+        guard seconds.isFinite && seconds >= 0 else { return "0:00" }
+        let totalSeconds = Int(seconds)
+        let minutes = totalSeconds / 60
+        let remainingSeconds = totalSeconds % 60
         return String(format: "%d:%02d", minutes, remainingSeconds)
     }
 }
@@ -427,9 +468,9 @@ struct AutoPlayingVideoCell: View {
     var body: some View {
         GeometryReader { geometry in
             ZStack {
-                if isPlaying, let player = playbackManager.currentPlayer {
-                    // Show video player when playing
-                    VideoPlayer(player: player)
+                if isPlaying {
+                    // Show video player when playing AND player exists
+                    VideoPlayer(player: playbackManager.currentPlayer)
                         .disabled(true) // Disable user interaction on the player
                         .aspectRatio(contentMode: .fill)
                         .frame(width: geometry.size.width, height: geometry.size.width * 9 / 16)
@@ -454,21 +495,17 @@ struct AutoPlayingVideoCell: View {
                     }
                     .padding(8)
 
-                    // Fullscreen button (bottom-right)
+                    // Detail page indicator (bottom-right) - tap video to enter detail page
                     VStack {
                         Spacer()
                         HStack {
                             Spacer()
-                            Button(action: {
-                                onFullscreenTap?()
-                            }) {
-                                Image(systemName: "arrow.up.left.and.arrow.down.right")
-                                    .font(.caption)
-                                    .foregroundColor(.white)
-                                    .padding(8)
-                                    .background(Color.black.opacity(0.5))
-                                    .clipShape(Circle())
-                            }
+                            Image(systemName: "arrow.up.left.and.arrow.down.right")
+                                .font(.caption)
+                                .foregroundColor(.white)
+                                .padding(8)
+                                .background(Color.black.opacity(0.5))
+                                .clipShape(Circle())
                         }
                     }
                     .padding(8)
@@ -517,18 +554,15 @@ struct AutoPlayingVideoCell: View {
             .frame(width: geometry.size.width, height: geometry.size.width * 9 / 16)
             .clipped()
             .cornerRadius(8)
-            .contentShape(Rectangle())
-            .onTapGesture {
-                // Tap to fullscreen
-                onFullscreenTap?()
-            }
         }
         .frame(height: (UIScreen.main.bounds.width - 32) * 9 / 16)
     }
 
     private func formatDuration(_ seconds: Double) -> String {
-        let minutes = Int(seconds) / 60
-        let remainingSeconds = Int(seconds) % 60
+        guard seconds.isFinite && seconds >= 0 else { return "0:00" }
+        let totalSeconds = Int(seconds)
+        let minutes = totalSeconds / 60
+        let remainingSeconds = totalSeconds % 60
         return String(format: "%d:%02d", minutes, remainingSeconds)
     }
 }
@@ -544,13 +578,14 @@ struct TwoMediaView: View {
         HStack(spacing: 4) {
             ForEach(media) { item in
                 MediaCell(item: item, aspectRatio: 1, onVideoTap: onVideoTap, onImageTap: onImageTap)
+                    .frame(maxWidth: .infinity)
             }
         }
         .frame(height: (UIScreen.main.bounds.width - 32 - 4) / 2)
     }
 }
 
-// MARK: - Three Media View (1 large + 2 small)
+// MARK: - Three Media View (3 equal images in a row)
 
 struct ThreeMediaView: View {
     let media: [MediaDTO]
@@ -559,18 +594,12 @@ struct ThreeMediaView: View {
 
     var body: some View {
         HStack(spacing: 4) {
-            // 左侧大图 (2/3 宽度)
-            MediaCell(item: media[0], aspectRatio: 1, onVideoTap: onVideoTap, onImageTap: onImageTap)
-                .frame(maxWidth: .infinity)
-
-            // 右侧两张小图 (1/3 宽度)
-            VStack(spacing: 4) {
-                MediaCell(item: media[1], aspectRatio: 1, onVideoTap: onVideoTap, onImageTap: onImageTap)
-                MediaCell(item: media[2], aspectRatio: 1, onVideoTap: onVideoTap, onImageTap: onImageTap)
+            ForEach(media) { item in
+                MediaCell(item: item, aspectRatio: 1, onVideoTap: onVideoTap, onImageTap: onImageTap)
+                    .frame(maxWidth: .infinity)
             }
-            .frame(width: (UIScreen.main.bounds.width - 32 - 8) / 3)
         }
-        .frame(height: (UIScreen.main.bounds.width - 32 - 4) / 2)
+        .frame(height: (UIScreen.main.bounds.width - 32 - 8) / 3)
     }
 }
 
@@ -637,48 +666,52 @@ struct MediaCell: View {
     var onImageTap: ((MediaDTO) -> Void)?
 
     var body: some View {
-        ZStack {
-            if item.type == "image" {
-                AsyncImage(url: URL(string: item.fullThumbnailURL ?? item.fullURL)) { image in
-                    image
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                } placeholder: {
-                    Color.gray.opacity(0.2)
-                        .overlay(ProgressView())
-                }
-            } else {
-                // 视频缩略图
-                AsyncImage(url: URL(string: item.fullThumbnailURL ?? "")) { image in
-                    image
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                } placeholder: {
-                    Color.gray.opacity(0.3)
-                }
-
-                // 小播放按钮
-                Circle()
-                    .fill(.white.opacity(0.9))
-                    .frame(width: 32, height: 32)
-                    .overlay {
-                        Image(systemName: "play.fill")
-                            .font(.system(size: 14))
-                            .foregroundColor(.blue)
-                            .offset(x: 1, y: 0)
+        GeometryReader { geometry in
+            ZStack {
+                if item.type == "image" {
+                    AsyncImage(url: URL(string: item.fullThumbnailURL ?? item.fullURL)) { image in
+                        image
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                    } placeholder: {
+                        Color.gray.opacity(0.2)
+                            .overlay(ProgressView())
                     }
+                } else {
+                    // 视频缩略图
+                    AsyncImage(url: URL(string: item.fullThumbnailURL ?? "")) { image in
+                        image
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                    } placeholder: {
+                        Color.gray.opacity(0.3)
+                    }
+
+                    // 小播放按钮
+                    Circle()
+                        .fill(.white.opacity(0.9))
+                        .frame(width: 32, height: 32)
+                        .overlay {
+                            Image(systemName: "play.fill")
+                                .font(.system(size: 14))
+                                .foregroundColor(.blue)
+                                .offset(x: 1, y: 0)
+                        }
+                }
+            }
+            .frame(width: geometry.size.width, height: geometry.size.height)
+            .clipped()
+            .cornerRadius(8)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                // Only handle image tap, video tap should go to detail page
+                if item.type == "image" {
+                    onImageTap?(item)
+                }
+                // Video tap is not handled here, let it pass to parent view for detail page navigation
             }
         }
-        .clipped()
-        .cornerRadius(8)
-        .contentShape(Rectangle())
-        .onTapGesture {
-            if item.type == "video" {
-                onVideoTap?(item)
-            } else {
-                onImageTap?(item)
-            }
-        }
+        .aspectRatio(aspectRatio, contentMode: .fit)
     }
 }
 

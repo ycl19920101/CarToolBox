@@ -118,6 +118,16 @@ struct PostDTO: Codable, Identifiable {
     var createdAtDate: Date? {
         return ISO8601DateFormatter().date(from: created_at)
     }
+
+    /// Check if post has video media
+    var hasVideo: Bool {
+        return media.contains { $0.type == "video" }
+    }
+
+    /// Get the first video media if available
+    var firstVideoMedia: MediaDTO? {
+        return media.first { $0.type == "video" }
+    }
 }
 
 // MARK: - Media Data Transfer Object
