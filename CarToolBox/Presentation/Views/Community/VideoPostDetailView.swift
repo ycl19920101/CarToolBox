@@ -235,7 +235,7 @@ struct CommentsSheetView: View {
                             }
                     }
 
-                    if viewModel.comments.isEmpty && !viewModel.isLoading {
+                    if viewModel.comments.isEmpty && !viewModel.isLoadingComments {
                         VStack(spacing: 12) {
                             Image(systemName: "bubble.right")
                                 .font(.largeTitle)

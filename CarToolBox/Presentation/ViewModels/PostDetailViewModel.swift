@@ -12,7 +12,8 @@ import Combine
 class PostDetailViewModel: ObservableObject {
     @Published var post: PostDTO?
     @Published var comments: [CommentDTO] = []
-    @Published var isLoading: Bool = false
+    @Published var isLoadingPost: Bool = false
+    @Published var isLoadingComments: Bool = false
     @Published var errorMessage: String?
     @Published var hasMoreComments: Bool = false
     @Published var commentText: String = ""
@@ -26,8 +27,9 @@ class PostDetailViewModel: ObservableObject {
         self.postId = postId
         self.communityService = CommunityService()
         Task {
-            await loadPostDetail()
-            await loadComments()
+            async let postDetail: Void = loadPostDetail()
+            async let comments: Void = loadComments()
+            _ = await (postDetail, comments)
         }
     }
 
@@ -38,68 +40,94 @@ class PostDetailViewModel: ObservableObject {
 
     @MainActor
     func loadPostDetail() async {
-        guard !isLoading else { return }
+        guard !isLoadingPost else { return }
 
-        isLoading = true
+        isLoadingPost = true
         errorMessage = nil
 
         communityService.getPostDetail(postId) { [weak self] response, error in
-            guard let self = self else { return }
+            Task { @MainActor [weak self] in
+                guard let self = self else { return }
 
-            if let error = error {
-                self.errorMessage = error.localizedDescription
-            } else if let response = response,
-                      let success = response["success"] as? Bool,
-                      success,
-                      let data = response["data"] as? [String: Any] {
-                do {
-                    let jsonData = try JSONSerialization.data(withJSONObject: data)
-                    self.post = try JSONDecoder().decode(PostDTO.self, from: jsonData)
-                } catch {
+                if let error = error {
                     self.errorMessage = error.localizedDescription
+                } else if let response = response,
+                          let success = response["success"] as? Bool,
+                          success,
+                          let data = response["data"] as? [String: Any] {
+                    do {
+                        let jsonData = try JSONSerialization.data(withJSONObject: data)
+                        self.post = try JSONDecoder().decode(PostDTO.self, from: jsonData)
+                    } catch {
+                        self.errorMessage = error.localizedDescription
+                    }
                 }
-            }
 
-            self.isLoading = false
+                self.isLoadingPost = false
+            }
         }
     }
 
     @MainActor
     func loadComments() async {
-        guard !isLoading else { return }
+        guard !isLoadingComments else { return }
 
-        isLoading = true
+        isLoadingComments = true
 
         communityService.getCommentsForPost(postId, page: currentPage, pageSize: pageSize) { [weak self] response, error in
-            guard let self = self else { return }
+            Task { @MainActor [weak self] in
+                guard let self = self else { return }
 
-            if let error = error {
-                self.errorMessage = error.localizedDescription
-            } else if let response = response,
-                      let success = response["success"] as? Bool,
-                      success,
-                      let data = response["data"] as? [String: Any],
-                      let commentsData = data["comments"] as? [[String: Any]] {
-                do {
-                    let jsonData = try JSONSerialization.data(withJSONObject: commentsData)
-                    let newComments = try JSONDecoder().decode([CommentDTO].self, from: jsonData)
-                    self.comments.append(contentsOf: newComments)
-                    self.hasMoreComments = data["has_more"] as? Bool ?? false
-                    self.currentPage += 1
-                } catch {
+                if let error = error {
+                    Logger.community.error("Load comments error: \(error.localizedDescription)")
                     self.errorMessage = error.localizedDescription
-                }
-            }
+                } else if let response = response {
+                    Logger.community.debug("Load comments response: \(response)")
 
-            self.isLoading = false
+                    // 尝试解析评论数据
+                    var commentsData: [[String: Any]]?
+                    var hasMore = false
+
+                    // 格式1: { "success": true, "data": { "comments": [...] } }
+                    if let success = response["success"] as? Bool,
+                       success,
+                       let data = response["data"] as? [String: Any] {
+                        commentsData = data["comments"] as? [[String: Any]]
+                        hasMore = data["has_more"] as? Bool ?? false
+                    }
+                    // 格式2: { "comments": [...] }
+                    else if let directComments = response["comments"] as? [[String: Any]] {
+                        commentsData = directComments
+                        hasMore = response["has_more"] as? Bool ?? false
+                    }
+
+                    if let commentsData = commentsData {
+                        do {
+                            let jsonData = try JSONSerialization.data(withJSONObject: commentsData)
+                            let newComments = try JSONDecoder().decode([CommentDTO].self, from: jsonData)
+                            Logger.community.debug("Decoded \(newComments.count) comments")
+                            self.comments.append(contentsOf: newComments)
+                            self.hasMoreComments = hasMore
+                            self.currentPage += 1
+                        } catch {
+                            Logger.community.error("Decode comments error: \(error.localizedDescription)")
+                            self.errorMessage = error.localizedDescription
+                        }
+                    } else {
+                        Logger.community.warning("No comments data found in response")
+                    }
+                }
+
+                self.isLoadingComments = false
+            }
         }
     }
 
     func toggleLike() {
-        Task { [weak self] in
-            guard let self = self else { return }
+        communityService.toggleLike(withTargetType: "post", targetId: postId) { [weak self] response, error in
+            Task { @MainActor [weak self] in
+                guard let self = self else { return }
 
-            self.communityService.toggleLike(withTargetType: "post", targetId: self.postId) { response, error in
                 if let error = error {
                     self.errorMessage = error.localizedDescription
                 } else if let response = response,
@@ -118,37 +146,39 @@ class PostDetailViewModel: ObservableObject {
     func createComment(content: String, parentId: String? = nil) async {
         guard !content.isEmpty else { return }
 
-        isLoading = true
+        isLoadingComments = true
 
         communityService.createComment(forPost: postId, content: content, parentId: parentId, replyToUserId: nil) { [weak self] response, error in
-            guard let self = self else { return }
+            Task { @MainActor [weak self] in
+                guard let self = self else { return }
 
-            if let error = error {
-                self.errorMessage = error.localizedDescription
-            } else if let response = response,
-                      let success = response["success"] as? Bool,
-                      success,
-                      let data = response["data"] as? [String: Any] {
-                do {
-                    let jsonData = try JSONSerialization.data(withJSONObject: data)
-                    let comment = try JSONDecoder().decode(CommentDTO.self, from: jsonData)
-                    self.comments.append(comment)
-                    self.post?.comment_count += 1
-                    self.commentText = ""
-                } catch {
+                if let error = error {
                     self.errorMessage = error.localizedDescription
+                } else if let response = response,
+                          let success = response["success"] as? Bool,
+                          success,
+                          let data = response["data"] as? [String: Any] {
+                    do {
+                        let jsonData = try JSONSerialization.data(withJSONObject: data)
+                        let comment = try JSONDecoder().decode(CommentDTO.self, from: jsonData)
+                        self.comments.append(comment)
+                        self.post?.comment_count += 1
+                        self.commentText = ""
+                    } catch {
+                        self.errorMessage = error.localizedDescription
+                    }
                 }
-            }
 
-            self.isLoading = false
+                self.isLoadingComments = false
+            }
         }
     }
 
     func deleteComment(_ comment: CommentDTO) {
-        Task { [weak self] in
-            guard let self = self else { return }
+        communityService.deleteComment(comment.id) { [weak self] response, error in
+            Task { @MainActor [weak self] in
+                guard let self = self else { return }
 
-            self.communityService.deleteComment(comment.id) { response, error in
                 if let error = error {
                     self.errorMessage = error.localizedDescription
                 } else if let response = response,

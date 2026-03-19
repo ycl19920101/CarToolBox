@@ -116,7 +116,7 @@ struct PostDTO: Codable, Identifiable {
     }
 
     var createdAtDate: Date? {
-        return ISO8601DateFormatter().date(from: created_at)
+        return DateParser.parse(created_at)
     }
 
     /// Check if post has video media
@@ -251,8 +251,53 @@ struct CommentDTO: Codable, Identifiable {
         case author_name, author_avatar, reply_to_user_name, is_liked, replies
     }
 
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+
+        // id 可能有多种格式
+        if let idString = try? container.decode(String.self, forKey: .id) {
+            id = idString
+        } else if let idInt = try? container.decode(Int.self, forKey: .id) {
+            id = String(idInt)
+        } else {
+            id = UUID().uuidString
+        }
+
+        // post_id 可能有多种格式
+        if let postIdString = try? container.decode(String.self, forKey: .post_id) {
+            post_id = postIdString
+        } else if let postIdInt = try? container.decode(Int.self, forKey: .post_id) {
+            post_id = String(postIdInt)
+        } else {
+            post_id = ""
+        }
+
+        // user_id 可能有多种格式
+        if let userIdString = try? container.decode(String.self, forKey: .user_id) {
+            user_id = userIdString
+        } else if let userIdInt = try? container.decode(Int.self, forKey: .user_id) {
+            user_id = String(userIdInt)
+        } else {
+            user_id = ""
+        }
+
+        parent_id = try? container.decode(String.self, forKey: .parent_id)
+        reply_to_user_id = try? container.decode(String.self, forKey: .reply_to_user_id)
+        content = try container.decode(String.self, forKey: .content)
+        like_count = (try? container.decode(Int.self, forKey: .like_count)) ?? 0
+        status = (try? container.decode(String.self, forKey: .status)) ?? "active"
+        created_at = (try? container.decode(String.self, forKey: .created_at)) ?? ISO8601DateFormatter().string(from: Date())
+        deleted_at = try? container.decode(String.self, forKey: .deleted_at)
+
+        author_name = try? container.decode(String.self, forKey: .author_name)
+        author_avatar = try? container.decode(String.self, forKey: .author_avatar)
+        reply_to_user_name = try? container.decode(String.self, forKey: .reply_to_user_name)
+        is_liked = (try? container.decode(Bool.self, forKey: .is_liked)) ?? false
+        replies = try? container.decode([CommentDTO].self, forKey: .replies)
+    }
+
     var createdAtDate: Date? {
-        return ISO8601DateFormatter().date(from: created_at)
+        return DateParser.parse(created_at)
     }
 }
 

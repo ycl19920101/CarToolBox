@@ -43,7 +43,7 @@ struct VideoPostContentPanel: View {
                 Spacer()
 
                 // Time
-                Text(relativeTime(from: post.createdAtDate))
+                Text(DateParser.relativeTime(from: post.createdAtDate))
                     .font(.caption)
                     .foregroundColor(.white.opacity(0.7))
             }
@@ -115,16 +115,6 @@ struct VideoPostContentPanel: View {
                 endPoint: .bottom
             )
         )
-    }
-
-    // MARK: - Helper Methods
-
-    private func relativeTime(from date: Date?) -> String {
-        guard let date = date else { return "" }
-
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        return formatter.localizedString(for: date, relativeTo: Date())
     }
 }
 

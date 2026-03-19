@@ -250,7 +250,7 @@ struct PostCellView: View {
                 Text(post.author_name ?? "匿名")
                     .fontWeight(.bold)
                 Spacer()
-                Text(post.createdAtDate?.formatted() ?? "")
+                Text(DateParser.relativeTime(from: post.createdAtDate))
                     .font(.caption)
                     .foregroundColor(.gray)
             }
