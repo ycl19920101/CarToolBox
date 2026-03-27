@@ -33,9 +33,19 @@ struct PostDTO: Codable, Identifiable {
     var media: [MediaDTO]
 
     enum CodingKeys: String, CodingKey {
-        case id, user_id, title, content, status, view_count, like_count, comment_count
-        case created_at, updated_at, deleted_at
-        case author_name, author_avatar, is_liked, media
+        case id
+        case user_id = "userId"
+        case title, content, status
+        case view_count = "viewCount"
+        case like_count = "likeCount"
+        case comment_count = "commentCount"
+        case created_at = "createdAt"
+        case updated_at = "updatedAt"
+        case deleted_at = "deletedAt"
+        case author_name, author_avatar
+        case is_liked = "isLiked"
+        case media
+        case author
     }
 
     // Memberwise initializer for previews and manual construction
@@ -85,11 +95,13 @@ struct PostDTO: Codable, Identifiable {
             id = UUID().uuidString
         }
 
-        // user_id 可能有多种格式
+        // user_id 可能有多种格式，也可能从 author.id 获取
         if let userIdString = try? container.decode(String.self, forKey: .user_id) {
             user_id = userIdString
         } else if let userIdInt = try? container.decode(Int.self, forKey: .user_id) {
             user_id = String(userIdInt)
+        } else if let author = try? container.decode(AuthorDTO.self, forKey: .author) {
+            user_id = author.id
         } else {
             user_id = ""
         }
@@ -103,8 +115,16 @@ struct PostDTO: Codable, Identifiable {
         created_at = try container.decode(String.self, forKey: .created_at)
         updated_at = try? container.decode(String.self, forKey: .updated_at)
         deleted_at = try? container.decode(String.self, forKey: .deleted_at)
-        author_name = try? container.decode(String.self, forKey: .author_name)
-        author_avatar = try? container.decode(String.self, forKey: .author_avatar)
+
+        // 优先从嵌套 author 对象获取，其次从平铺字段获取
+        if let author = try? container.decode(AuthorDTO.self, forKey: .author) {
+            author_name = author.username
+            author_avatar = author.avatar
+        } else {
+            author_name = try? container.decode(String.self, forKey: .author_name)
+            author_avatar = try? container.decode(String.self, forKey: .author_avatar)
+        }
+
         is_liked = (try? container.decode(Bool.self, forKey: .is_liked)) ?? false
 
         // media 解码，如果失败则使用空数组
@@ -128,6 +148,59 @@ struct PostDTO: Codable, Identifiable {
     var firstVideoMedia: MediaDTO? {
         return media.first { $0.type == "video" }
     }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(user_id, forKey: .user_id)
+        try container.encode(title, forKey: .title)
+        try container.encode(content, forKey: .content)
+        try container.encode(status, forKey: .status)
+        try container.encode(view_count, forKey: .view_count)
+        try container.encode(like_count, forKey: .like_count)
+        try container.encode(comment_count, forKey: .comment_count)
+        try container.encode(created_at, forKey: .created_at)
+        try container.encodeIfPresent(updated_at, forKey: .updated_at)
+        try container.encodeIfPresent(deleted_at, forKey: .deleted_at)
+        try container.encodeIfPresent(author_name, forKey: .author_name)
+        try container.encodeIfPresent(author_avatar, forKey: .author_avatar)
+        try container.encode(is_liked, forKey: .is_liked)
+        try container.encode(media, forKey: .media)
+    }
+}
+
+// MARK: - Author Data Transfer Object
+
+struct AuthorDTO: Codable {
+    let id: String
+    let username: String?
+    let avatar: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, username, avatar
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+
+        if let idString = try? container.decode(String.self, forKey: .id) {
+            id = idString
+        } else if let idInt = try? container.decode(Int.self, forKey: .id) {
+            id = String(idInt)
+        } else {
+            id = ""
+        }
+
+        username = try? container.decode(String.self, forKey: .username)
+        avatar = try? container.decode(String.self, forKey: .avatar)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encodeIfPresent(username, forKey: .username)
+        try container.encodeIfPresent(avatar, forKey: .avatar)
+    }
 }
 
 // MARK: - Media Data Transfer Object
@@ -145,7 +218,12 @@ struct MediaDTO: Codable, Identifiable {
     let sort_order: Int?
 
     enum CodingKeys: String, CodingKey {
-        case id, post_id, type, url, thumbnail_url, width, height, size, duration, sort_order
+        case id
+        case post_id = "postId"
+        case type, url
+        case thumbnail_url = "thumbnailUrl"
+        case width, height, size, duration
+        case sort_order = "sortOrder"
     }
 
     // 完整 URL（自动拼接基础域名）
@@ -246,9 +324,20 @@ struct CommentDTO: Codable, Identifiable {
     var replies: [CommentDTO]?
 
     enum CodingKeys: String, CodingKey {
-        case id, post_id, user_id, parent_id, reply_to_user_id, content
-        case like_count, status, created_at, deleted_at
-        case author_name, author_avatar, reply_to_user_name, is_liked, replies
+        case id
+        case post_id = "postId"
+        case user_id = "userId"
+        case parent_id = "parentId"
+        case reply_to_user_id = "replyToUserId"
+        case content
+        case like_count = "likeCount"
+        case status
+        case created_at = "createdAt"
+        case deleted_at = "deletedAt"
+        case author_name, author_avatar, reply_to_user_name
+        case is_liked = "isLiked"
+        case replies
+        case author
     }
 
     init(from decoder: Decoder) throws {
@@ -272,11 +361,13 @@ struct CommentDTO: Codable, Identifiable {
             post_id = ""
         }
 
-        // user_id 可能有多种格式
+        // user_id 可能有多种格式，也可能从 author.id 获取
         if let userIdString = try? container.decode(String.self, forKey: .user_id) {
             user_id = userIdString
         } else if let userIdInt = try? container.decode(Int.self, forKey: .user_id) {
             user_id = String(userIdInt)
+        } else if let author = try? container.decode(AuthorDTO.self, forKey: .author) {
+            user_id = author.id
         } else {
             user_id = ""
         }
@@ -289,8 +380,15 @@ struct CommentDTO: Codable, Identifiable {
         created_at = (try? container.decode(String.self, forKey: .created_at)) ?? ISO8601DateFormatter().string(from: Date())
         deleted_at = try? container.decode(String.self, forKey: .deleted_at)
 
-        author_name = try? container.decode(String.self, forKey: .author_name)
-        author_avatar = try? container.decode(String.self, forKey: .author_avatar)
+        // 优先从嵌套 author 对象获取，其次从平铺字段获取
+        if let author = try? container.decode(AuthorDTO.self, forKey: .author) {
+            author_name = author.username
+            author_avatar = author.avatar
+        } else {
+            author_name = try? container.decode(String.self, forKey: .author_name)
+            author_avatar = try? container.decode(String.self, forKey: .author_avatar)
+        }
+
         reply_to_user_name = try? container.decode(String.self, forKey: .reply_to_user_name)
         is_liked = (try? container.decode(Bool.self, forKey: .is_liked)) ?? false
         replies = try? container.decode([CommentDTO].self, forKey: .replies)
@@ -298,6 +396,25 @@ struct CommentDTO: Codable, Identifiable {
 
     var createdAtDate: Date? {
         return DateParser.parse(created_at)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(post_id, forKey: .post_id)
+        try container.encode(user_id, forKey: .user_id)
+        try container.encodeIfPresent(parent_id, forKey: .parent_id)
+        try container.encodeIfPresent(reply_to_user_id, forKey: .reply_to_user_id)
+        try container.encode(content, forKey: .content)
+        try container.encode(like_count, forKey: .like_count)
+        try container.encode(status, forKey: .status)
+        try container.encode(created_at, forKey: .created_at)
+        try container.encodeIfPresent(deleted_at, forKey: .deleted_at)
+        try container.encodeIfPresent(author_name, forKey: .author_name)
+        try container.encodeIfPresent(author_avatar, forKey: .author_avatar)
+        try container.encodeIfPresent(reply_to_user_name, forKey: .reply_to_user_name)
+        try container.encode(is_liked, forKey: .is_liked)
+        try container.encodeIfPresent(replies, forKey: .replies)
     }
 }
 

@@ -10,6 +10,7 @@ import Combine
 
 struct LoginView: View {
     @ObservedObject private var viewModel: AuthViewModel
+    @Environment(\.dismiss) private var dismiss
     @State private var showRegister = false
     @State private var showForgotPassword = false
     @State private var showPassword = false
@@ -63,6 +64,7 @@ struct LoginView: View {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("取消") {
                         viewModel.clearLoginForm()
+                        dismiss()
                     }
                     .disabled(viewModel.isLoading)
                 }
@@ -94,6 +96,8 @@ struct LoginView: View {
                     showForgotPassword = false
                     showErrorAlert = false
                     showSuccessAlert = false
+                    // Dismiss the login sheet when login succeeds
+                    dismiss()
                 }
             }
             .sheet(isPresented: $showRegister) {

@@ -94,6 +94,12 @@ struct RegisterView: View {
             .onReceive(viewModel.$successMessage.dropFirst()) { successMessage in
                 showSuccessAlert = successMessage != nil
             }
+            .onChange(of: viewModel.isLoggedIn) { isLoggedIn in
+                if isLoggedIn {
+                    // Dismiss when registration succeeds and user is logged in
+                    dismiss()
+                }
+            }
         }
     }
 

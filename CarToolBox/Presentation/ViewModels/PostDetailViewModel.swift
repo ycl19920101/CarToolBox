@@ -92,13 +92,13 @@ class PostDetailViewModel: ObservableObject {
                     if let success = response["success"] as? Bool,
                        success,
                        let data = response["data"] as? [String: Any] {
-                        commentsData = data["comments"] as? [[String: Any]]
-                        hasMore = data["has_more"] as? Bool ?? false
+                        commentsData = data["comments"] as? [[String: Any]] ?? data["items"] as? [[String: Any]]
+                        hasMore = data["has_more"] as? Bool ?? data["hasNext"] as? Bool ?? false
                     }
                     // 格式2: { "comments": [...] }
                     else if let directComments = response["comments"] as? [[String: Any]] {
                         commentsData = directComments
-                        hasMore = response["has_more"] as? Bool ?? false
+                        hasMore = response["has_more"] as? Bool ?? response["hasNext"] as? Bool ?? false
                     }
 
                     if let commentsData = commentsData {
@@ -135,7 +135,7 @@ class PostDetailViewModel: ObservableObject {
                           success,
                           let data = response["data"] as? [String: Any] {
                     let liked = data["liked"] as? Bool ?? false
-                    let likeCount = data["like_count"] as? Int ?? 0
+                    let likeCount = data["likeCount"] as? Int ?? data["like_count"] as? Int ?? 0
                     self.post?.like_count = likeCount
                     self.post?.is_liked = liked
                 }

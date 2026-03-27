@@ -120,7 +120,7 @@
                         targetId:(NSString *)targetId
                       completion:(void (^)(NSDictionary * _Nullable, NSError * _Nullable))completion {
     NSString *path = @"/api/community/like";
-    NSDictionary *params = @{@"target_type": targetType, @"target_id": targetId};
+    NSDictionary *params = @{@"targetType": targetType, @"targetId": targetId};
 
     [[NetworkManager sharedInstance] POST:path parameters:params completion:^(NSDictionary *data, NSInteger statusCode, NSError *error) {
         if (error) {
@@ -168,10 +168,10 @@
 
     NSMutableDictionary *params = @{@"content": content}.mutableCopy;
     if (parentId) {
-        params[@"parent_id"] = parentId;
+        params[@"parentId"] = parentId;
     }
     if (replyToUserId) {
-        params[@"reply_to_user_id"] = replyToUserId;
+        params[@"replyToUserId"] = replyToUserId;
     }
 
     [[NetworkManager sharedInstance] POST:path parameters:params completion:^(NSDictionary *data, NSInteger statusCode, NSError *error) {

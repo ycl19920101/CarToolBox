@@ -227,6 +227,9 @@ class AuthViewModel: ObservableObject {
         keychainManager.delete(for: .rememberMe)
         keychainManager.delete(for: .lastLoginDate)
         keychainManager.delete(for: .biometricEnabled)
+
+        // Clear NetworkManager's manual auth token
+        NetworkManager.sharedInstance().clearAuthToken()
     }
 
     private func handleError(_ error: Error) {
@@ -610,7 +613,7 @@ class AuthViewModel: ObservableObject {
         Logger.auth.debug("Handling auth response...")
 
         // Handle user data - support both formats:
-        // 1. { "user": {...}, "tokens": {...} } - from login/register
+        // 1. { "user": {...}, "accessToken": "..." } - from login/register
         // 2. { "id": "...", "username": "..." } - direct user object from /me
         if let userDict = data["user"] as? [String: Any] {
             // Login/register response format
@@ -618,7 +621,7 @@ class AuthViewModel: ObservableObject {
             let userDTO = UserDTO(dictionary: userDict)
             currentUser.update(from: userDTO)
             Logger.auth.debug("User: id=\(currentUser.id), username=\(currentUser.username)")
-        } else if let userId = data["id"] as? String {
+        } else if data["id"] as? String != nil {
             // Direct user object format (from /me endpoint)
             Logger.auth.debug("Found direct user object in response")
             let userDTO = UserDTO(dictionary: data as? [String: Any] ?? [:])
@@ -626,26 +629,54 @@ class AuthViewModel: ObservableObject {
             Logger.auth.debug("User: id=\(currentUser.id), username=\(currentUser.username)")
         }
 
-        // Handle tokens
-        if let tokensDict = data["tokens"] as? [String: Any],
-           let accessToken = tokensDict["access_token"] as? String,
-           let refreshToken = tokensDict["refresh_token"] as? String {
+        // Handle tokens - support multiple formats:
+        // 1. Tokens at root level: { "accessToken": "...", "refreshToken": "..." }
+        // 2. Tokens nested: { "tokens": { "access_token": "..." } }
+        var accessToken: String?
+        var refreshToken: String?
 
-            Logger.auth.debug("Found tokens in response")
+        // Try root level first (camelCase)
+        accessToken = data["accessToken"] as? String
+        refreshToken = data["refreshToken"] as? String
+
+        // Try root level snake_case
+        if accessToken == nil {
+            accessToken = data["access_token"] as? String
+        }
+        if refreshToken == nil {
+            refreshToken = data["refresh_token"] as? String
+        }
+
+        // Try nested tokens object
+        if accessToken == nil, let tokensDict = data["tokens"] as? [String: Any] {
+            accessToken = tokensDict["access_token"] as? String
+                ?? tokensDict["accessToken"] as? String
+                ?? tokensDict["token"] as? String
+            refreshToken = tokensDict["refresh_token"] as? String
+                ?? tokensDict["refreshToken"] as? String
+        }
+
+        if let accessToken = accessToken, !accessToken.isEmpty {
             Logger.auth.debug("Access token: \(accessToken.prefix(20))...")
-            Logger.auth.debug("Refresh token: \(refreshToken.prefix(20))...")
+            Logger.auth.debug("Refresh token: \(refreshToken?.prefix(20) ?? "nil")...")
 
+            // Always set tokens in memory first (works even if Keychain fails)
+            authService.currentAccessToken = accessToken
+            authService.currentRefreshToken = refreshToken
+            Logger.auth.debug("✅ Tokens set in AuthService - currentAccessToken: \(authService.currentAccessToken ?? "nil")")
+
+            // Try to persist to Keychain (may fail on simulator)
             do {
                 try keychainManager.saveAccessToken(accessToken)
-                try keychainManager.saveRefreshToken(refreshToken)
-                authService.currentAccessToken = accessToken
-                authService.currentRefreshToken = refreshToken
-                Logger.auth.debug("✅ Tokens saved to keychain")
+                if let refreshToken = refreshToken {
+                    try keychainManager.saveRefreshToken(refreshToken)
+                }
+                Logger.auth.debug("✅ Tokens saved to Keychain")
             } catch {
-                Logger.auth.error("❌ Failed to save tokens: \(error)")
+                Logger.auth.warning("⚠️ Keychain save failed (tokens in memory still work): \(error)")
             }
         } else {
-            Logger.auth.debug("No tokens in response (might be /me endpoint)")
+            Logger.auth.warning("⚠️ No access token found in response")
         }
 
         saveAuthState()
@@ -779,8 +810,8 @@ extension UserDTO {
         self.email = dictionary["email"] as? String
         self.phone = dictionary["phone"] as? String
         self.avatar = dictionary["avatar"] as? String
-        self.created_at = dictionary["created_at"] as? String
-        self.updated_at = dictionary["updated_at"] as? String
-        self.last_login_at = dictionary["last_login_at"] as? String
+        self.created_at = dictionary["createdAt"] as? String ?? dictionary["created_at"] as? String
+        self.updated_at = dictionary["updatedAt"] as? String ?? dictionary["updated_at"] as? String
+        self.last_login_at = dictionary["lastLoginAt"] as? String ?? dictionary["last_login_at"] as? String
     }
 }

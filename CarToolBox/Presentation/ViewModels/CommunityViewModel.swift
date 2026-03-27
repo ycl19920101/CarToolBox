@@ -60,7 +60,7 @@ class CommunityViewModel: ObservableObject {
                       let success = response["success"] as? Bool,
                       success,
                       let data = response["data"] as? [String: Any] {
-                let postsData = data["posts"] as? [[String: Any]] ?? []
+                let postsData = data["items"] as? [[String: Any]] ?? []
 
                 // Debug: Log posts data
                 Logger.community.debug("Fetched \(postsData.count) posts")
@@ -85,7 +85,7 @@ class CommunityViewModel: ObservableObject {
                     } else {
                         self.posts.append(contentsOf: newPosts)
                     }
-                    self.hasMorePosts = data["has_more"] as? Bool ?? false
+                    self.hasMorePosts = data["has_more"] as? Bool ?? data["hasNext"] as? Bool ?? false
                     self.currentPage += 1
                 } catch {
                     self.errorMessage = error.localizedDescription
@@ -113,7 +113,7 @@ class CommunityViewModel: ObservableObject {
                           let success = response["success"] as? Bool,
                           success,
                           let data = response["data"] as? [String: Any] {
-                    let likeCount = data["like_count"] as? Int ?? 0
+                    let likeCount = data["likeCount"] as? Int ?? data["like_count"] as? Int ?? 0
                     let liked = data["liked"] as? Bool ?? false
                     if let index = self.posts.firstIndex(where: { $0.id == post.id }) {
                         self.posts[index].like_count = likeCount

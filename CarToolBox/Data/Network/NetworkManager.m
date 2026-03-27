@@ -20,6 +20,7 @@ NSErrorDomain const NetworkManagerErrorDomain = @"com.cartoolbox.network.error";
 @property (nonatomic, strong) NSURLSession *session;
 @property (nonatomic, strong) dispatch_queue_t networkQueue;
 @property (nonatomic, copy, nullable) NSString *manualAuthToken;
+@property (nonatomic, assign) BOOL isRefreshingToken;
 @end
 
 @implementation NetworkManager
@@ -85,9 +86,16 @@ NSErrorDomain const NetworkManagerErrorDomain = @"com.cartoolbox.network.error";
 - (NSString *)currentAuthToken {
     // Priority: manually set token > AuthService token
     if (self.manualAuthToken) {
+        [OCLogger debug:@"Network" message:@"Using manual auth token"];
         return self.manualAuthToken;
     }
-    return [AuthService sharedInstance].currentAccessToken;
+    NSString *token = [AuthService sharedInstance].currentAccessToken;
+    if (token.length > 0) {
+        [OCLogger debug:@"Network" message:[NSString stringWithFormat:@"Using AuthService token: %@...", [token substringToIndex:MIN(20, token.length)]]];
+    } else {
+        [OCLogger warning:@"Network" message:@"No auth token available! AuthService.currentAccessToken is nil"];
+    }
+    return token;
 }
 
 - (NSMutableURLRequest *)buildRequestWithPath:(NSString *)path
@@ -215,6 +223,15 @@ NSErrorDomain const NetworkManagerErrorDomain = @"com.cartoolbox.network.error";
              parameters:(NSDictionary *)parameters
                 headers:(NSDictionary *)headers
              completion:(NetworkCompletionHandler)completion {
+    [self requestWithPath:path method:method parameters:parameters headers:headers isRetry:NO completion:completion];
+}
+
+- (void)requestWithPath:(NSString *)path
+                 method:(HTTPMethod)method
+             parameters:(NSDictionary *)parameters
+                headers:(NSDictionary *)headers
+               isRetry:(BOOL)isRetry
+             completion:(NetworkCompletionHandler)completion {
     NSMutableURLRequest *request = [self buildRequestWithPath:path method:method parameters:parameters headers:headers];
 
     [self logRequest:request];
@@ -246,6 +263,26 @@ NSErrorDomain const NetworkManagerErrorDomain = @"com.cartoolbox.network.error";
 
             NSInteger statusCode = httpResponse.statusCode;
 
+            // Handle 401 Unauthorized - try to refresh token
+            if (statusCode == 401 && !isRetry) {
+                [OCLogger warning:@"Network" message:@"Received 401, attempting to refresh token..."];
+
+                [strongSelf refreshTokenWithCompletion:^(BOOL success) {
+                    if (success) {
+                        [OCLogger info:@"Network" message:@"Token refreshed, retrying request..."];
+                        // Retry the original request with new token
+                        [strongSelf requestWithPath:path method:method parameters:parameters headers:headers isRetry:YES completion:completion];
+                    } else {
+                        [OCLogger error:@"Network" message:@"Token refresh failed, returning 401 error"];
+                        NSError *authError = [strongSelf errorWithCode:NetworkErrorCodeUnauthorized message:@"登录已过期，请重新登录"];
+                        dispatch_async(dispatch_get_main_queue(), ^{
+                            completion(nil, statusCode, authError);
+                        });
+                    }
+                }];
+                return;
+            }
+
             // Parse JSON response
             NSDictionary *jsonResponse = nil;
             if (data && data.length > 0) {
@@ -269,6 +306,51 @@ NSErrorDomain const NetworkManagerErrorDomain = @"com.cartoolbox.network.error";
     }];
 
     [task resume];
+}
+
+#pragma mark - Token Refresh
+
+- (void)refreshTokenWithCompletion:(void (^)(BOOL success))completion {
+    // Prevent multiple refresh attempts
+    if (self.isRefreshingToken) {
+        [OCLogger debug:@"Network" message:@"Token refresh already in progress, waiting..."];
+        // Wait and retry (simple approach)
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            completion(NO);
+        });
+        return;
+    }
+
+    self.isRefreshingToken = YES;
+
+    NSString *refreshToken = [AuthService sharedInstance].currentRefreshToken;
+    if (!refreshToken.length) {
+        [OCLogger error:@"Network" message:@"No refresh token available"];
+        self.isRefreshingToken = NO;
+        completion(NO);
+        return;
+    }
+
+    [OCLogger debug:@"Network" message:[NSString stringWithFormat:@"Using refresh token: %@...", [refreshToken substringToIndex:MIN(20, refreshToken.length)]]];
+
+    __weak typeof(self) weakSelf = self;
+
+    [[AuthService sharedInstance] refreshToken:refreshToken completion:^(NSDictionary *data, NSError *error) {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        strongSelf.isRefreshingToken = NO;
+
+        if (error || !data) {
+            [OCLogger error:@"Network" message:[NSString stringWithFormat:@"Token refresh failed: %@", error.localizedDescription ?: @"unknown"]];
+            // Clear invalid tokens
+            [[AuthService sharedInstance] clearTokens];
+            completion(NO);
+            return;
+        }
+
+        // AuthService.refreshToken already updates the tokens internally
+        [OCLogger info:@"Network" message:@"Token refresh successful"];
+        completion(YES);
+    }];
 }
 
 #pragma mark - Convenience Methods

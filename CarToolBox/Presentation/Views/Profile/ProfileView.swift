@@ -42,6 +42,13 @@ struct ProfileView: View {
             .sheet(isPresented: $showChangePassword) {
                 ChangePasswordView(viewModel: authViewModel)
             }
+            .onChange(of: authViewModel.isLoggedIn) { isLoggedIn in
+                if isLoggedIn {
+                    // Dismiss login/register sheets when user logs in
+                    showLogin = false
+                    showRegister = false
+                }
+            }
         }
     }
 

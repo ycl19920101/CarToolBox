@@ -134,7 +134,7 @@ class CreatePostViewModel: ObservableObject {
         let mediaData = uploadedMedia.isEmpty ? nil : uploadedMedia.map { [
             "type": $0.type,
             "url": $0.url,
-            "thumbnail_url": $0.thumbnail_url as Any,
+            "thumbnailUrl": $0.thumbnail_url as Any,
             "width": $0.width as Any,
             "height": $0.height as Any,
             "size": $0.size as Any,
@@ -220,7 +220,7 @@ class CreatePostViewModel: ObservableObject {
                         let media = MediaUpload(
                             type: data["type"] as? String ?? "image",
                             url: data["url"] as? String ?? "",
-                            thumbnail_url: data["thumbnail_url"] as? String,
+                            thumbnail_url: data["thumbnailUrl"] as? String ?? data["thumbnail_url"] as? String,
                             width: data["width"] as? Int,
                             height: data["height"] as? Int,
                             size: data["size"] as? Int,
@@ -257,7 +257,7 @@ class CreatePostViewModel: ObservableObject {
                     let media = MediaUpload(
                         type: data["type"] as? String ?? "video",
                         url: data["url"] as? String ?? "",
-                        thumbnail_url: data["thumbnail_url"] as? String,
+                        thumbnail_url: data["thumbnailUrl"] as? String ?? data["thumbnail_url"] as? String,
                         width: data["width"] as? Int,
                         height: data["height"] as? Int,
                         size: data["size"] as? Int,

@@ -36,9 +36,10 @@ typedef NS_ENUM(NSInteger, AuthErrorCode) {
 - (instancetype)initWithDictionary:(NSDictionary *)dict {
     self = [super init];
     if (self) {
-        _accessToken = dict[@"access_token"] ?: @"";
-        _refreshToken = dict[@"refresh_token"] ?: @"";
-        _expiresIn = [dict[@"expires_in"] integerValue];
+        // Support both snake_case and camelCase formats
+        _accessToken = dict[@"access_token"] ?: dict[@"accessToken"] ?: dict[@"token"] ?: @"";
+        _refreshToken = dict[@"refresh_token"] ?: dict[@"refreshToken"] ?: @"";
+        _expiresIn = [dict[@"expires_in"] integerValue] ?: [dict[@"expiresIn"] integerValue];
     }
     return self;
 }
@@ -103,10 +104,10 @@ typedef NS_ENUM(NSInteger, AuthErrorCode) {
     uname(&systemInfo);
 
     return @{
-        @"device_name": [[UIDevice currentDevice] name] ?: @"Unknown Device",
-        @"device_id": [[[UIDevice currentDevice] identifierForVendor] UUIDString] ?: @"unknown",
+        @"deviceName": [[UIDevice currentDevice] name] ?: @"Unknown Device",
+        @"deviceId": [[[UIDevice currentDevice] identifierForVendor] UUIDString] ?: @"unknown",
         @"model": [NSString stringWithUTF8String:systemInfo.machine] ?: @"unknown",
-        @"system_version": [[UIDevice currentDevice] systemVersion] ?: @"unknown"
+        @"systemVersion": [[UIDevice currentDevice] systemVersion] ?: @"unknown"
     };
 }
 
@@ -152,12 +153,16 @@ typedef NS_ENUM(NSInteger, AuthErrorCode) {
         }
 
         if (statusCode >= 200 && statusCode < 300 && data[@"success"]) {
-            // Store tokens
-            if (data[@"data"][@"tokens"]) {
-                [self updateTokensWithDictionary:data[@"data"][@"tokens"]];
+            NSDictionary *responseData = data[@"data"];
+            // Store tokens - support both nested and root level formats
+            if (responseData[@"tokens"]) {
+                [self updateTokensWithDictionary:responseData[@"tokens"]];
+            } else if (responseData[@"accessToken"]) {
+                // Tokens at root level of data
+                [self updateTokensWithDictionary:responseData];
             }
 
-            completion(data[@"data"], nil);
+            completion(responseData, nil);
         } else {
             completion(nil, [self errorFromResponse:data statusCode:statusCode]);
         }
@@ -169,9 +174,9 @@ typedef NS_ENUM(NSInteger, AuthErrorCode) {
               rememberMe:(BOOL)rememberMe
                completion:(AuthCompletionHandler)completion {
     NSMutableDictionary *params = [[self deviceInfo] mutableCopy];
-    params[@"identifier"] = identifier;
+    params[@"username"] = identifier;
     params[@"password"] = password;
-    params[@"remember_me"] = @(rememberMe);
+    params[@"rememberMe"] = @(rememberMe);
 
     NSString *path = [self authPath:@"/login"];
 
@@ -182,12 +187,16 @@ typedef NS_ENUM(NSInteger, AuthErrorCode) {
         }
 
         if (statusCode >= 200 && statusCode < 300 && data[@"success"]) {
-            // Store tokens
-            if (data[@"data"][@"tokens"]) {
-                [self updateTokensWithDictionary:data[@"data"][@"tokens"]];
+            NSDictionary *responseData = data[@"data"];
+            // Store tokens - support both nested and root level formats
+            if (responseData[@"tokens"]) {
+                [self updateTokensWithDictionary:responseData[@"tokens"]];
+            } else if (responseData[@"accessToken"]) {
+                // Tokens at root level of data
+                [self updateTokensWithDictionary:responseData];
             }
 
-            completion(data[@"data"], nil);
+            completion(responseData, nil);
         } else {
             completion(nil, [self errorFromResponse:data statusCode:statusCode]);
         }
@@ -225,7 +234,7 @@ typedef NS_ENUM(NSInteger, AuthErrorCode) {
 - (void)loginWithBiometricToken:(NSString *)refreshToken
                      completion:(AuthCompletionHandler)completion {
     NSMutableDictionary *params = [[self deviceInfo] mutableCopy];
-    params[@"refresh_token"] = refreshToken;
+    params[@"refreshToken"] = refreshToken;
 
     NSString *path = [self authPath:@"/biometric-login"];
 
@@ -274,8 +283,8 @@ typedef NS_ENUM(NSInteger, AuthErrorCode) {
                         to:(NSString *)newPassword
                  completion:(SimpleCompletionHandler)completion {
     NSDictionary *params = @{
-        @"old_password": oldPassword,
-        @"new_password": newPassword
+        @"oldPassword": oldPassword,
+        @"newPassword": newPassword
     };
 
     NSString *path = [self authPath:@"/change-password"];
@@ -342,23 +351,34 @@ typedef NS_ENUM(NSInteger, AuthErrorCode) {
 
 - (void)refreshToken:(NSString *)refreshToken
           completion:(AuthCompletionHandler)completion {
-    NSDictionary *params = @{@"refresh_token": refreshToken};
+    NSDictionary *params = @{@"refreshToken": refreshToken};
     NSString *path = [self authPath:@"/refresh"];
+
+    // Temporarily clear the access token to avoid sending expired token
+    NSString *oldAccessToken = [AuthService sharedInstance].currentAccessToken;
+    [AuthService sharedInstance].currentAccessToken = nil;
 
     [[NetworkManager sharedInstance] POST:path parameters:params completion:^(NSDictionary *data, NSInteger statusCode, NSError *error) {
         if (error) {
+            // Restore old token on error (will be cleared by caller if needed)
+            [AuthService sharedInstance].currentAccessToken = oldAccessToken;
             completion(nil, error);
             return;
         }
 
         if (statusCode >= 200 && statusCode < 300 && data[@"success"]) {
-            // Update tokens
-            if (data[@"data"][@"tokens"]) {
-                [self updateTokensWithDictionary:data[@"data"][@"tokens"]];
+            // Update tokens from response
+            NSDictionary *responseData = data[@"data"];
+            if (responseData[@"tokens"]) {
+                [self updateTokensWithDictionary:responseData[@"tokens"]];
+            } else if (responseData[@"accessToken"]) {
+                // Tokens at root level of data
+                [self updateTokensWithDictionary:responseData];
             }
-
-            completion(data[@"data"], nil);
+            completion(responseData, nil);
         } else {
+            // Restore old token on failure
+            [AuthService sharedInstance].currentAccessToken = oldAccessToken;
             completion(nil, [self errorFromResponse:data statusCode:statusCode]);
         }
     }];
